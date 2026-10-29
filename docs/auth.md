@@ -88,6 +88,10 @@ In this example, new users can register only with role `5`. Login requests can s
 
 For new users created through OTP or Google login, the requested role must pass both lists. These settings do not define role permissions or apply to the static `/auth/login-password` endpoint.
 
+Every login (password, OTP, Google):
+- **Deleted or deactivated users are refused** with `account deleted` or `account deactivated` (403), checked only after valid credentials, so a stranger learns nothing about the account.
+- **Emails match whatever their case**: `Ravi@Example.com` and `ravi@example.com` are the same user; new users are saved with the email in lowercase.
+
 `config_login_allowed_roles` replaces the former `config_allowed_users_role` name. Update existing configuration overrides to use the new name.
 
 | Endpoint | Credentials | Notes |
@@ -100,14 +104,35 @@ For new users created through OTP or Google login, the requested role must pass 
 | `/auth/login-id-ext-password` | id_ext + password | |
 | `/auth/login-email-otp` | email + otp | Verifies OTP against `otp` table, auto-creates user on first login. |
 | `/auth/login-mobile-otp` | mobile + otp | Same as email OTP, sent via SMS. |
-| `/auth/login-google` | google_token (+ role) | Verifies Google ID token against `config_google_login_client_id`. |
+| `/auth/login-google` | google_token (+ role) | Verifies the Google ID token against `config_google_login_client_id` and requires Google's `email_verified`. Finds the user by `google_login_id`; else links the user with the same email and role to this Google account; else creates one (saving `email`, `name`, `google_login_metadata`). |
 
 ### `POST /auth/login-password`
 Compares the input against `config_login_password` configured in `.env`. If unconfigured, raises `"config_login_password not configured"`. Comparison uses `hmac.compare_digest` to prevent timing attacks.
 
 ---
 
-## 4. OTP Flow
+## 4. Managing Users
+
+Rows of `users` are written only through these APIs; the generic object APIs (`/my/object-update`, `/my/object-delete`, `/admin/object-create`, `/admin/object-update`, `/admin/object-delete`) refuse `table=users` and name the right one. The one exception is `/admin/postgres-import` (admins only, any table): a CSV can create or update `users` in bulk, and its `password` cells are hashed like everywhere else. Reading stays generic: `GET /my/profile` (own row plus `config_sql["profile_metadata"]`) and `/admin/object-read?table=users` (`password` is never readable).
+
+| API | Query | Body | Rules |
+|---|---|---|---|
+| `POST /admin/user-create` | | `{role, username, password}` | All three required, nothing else accepted; returns `{"id": ...}`. Profile columns are set afterwards with `/admin/user-update` |
+| `PUT /admin/user-update` | | `{id, ...users columns}` | `email`/`mobile` need `otp` only when `config_is_otp_require_users_update` is on. The root user's `role`, `permissions` and `deactivated_at` cannot change |
+| `DELETE /admin/user-delete` | `id` | | One user; never the root user |
+| `PUT /my/user-update` | | `{...own users columns}` | Own row from the token (an `id`, if sent, must be the user's own). `email`/`mobile` always need `otp` (sent to the new value with `/public/otp-send-email` or `-mobile`). Columns in `config_column_users_my_blocked` (`role`, `permissions`, `deactivated_at`, ...) are refused |
+| `DELETE /my/user-delete` | | | Own account; token only |
+
+Both updates accept any `users` column (Atom's and a project's own), checked against the table; only the fields sent are updated.
+
+Rules for both updates:
+- A column in `config_column_single_update` (`username`, `password`, `email`, `mobile`) is updated alone: `{password}`, `{email, otp}`, never `{password, name}`.
+- Columns in `config_column_users_blocked` (`created_*`, `updated_*`, `deleted_*`, `is_protected`, `last_active_at`) are refused by both; columns in `config_column_users_my_blocked` only by `/my/user-update`; every other column, a project's own included, is allowed. A project adds its own columns to either list in `config_extend.py`.
+- `password` is hashed (Argon2) and logged in `log_users_password`; `email` is saved in lowercase; formats follow `config_column_regex`.
+
+Deleting needs two switches, because the database guards `users` too: `config_is_user_delete=true` and `users` removed from `config_postgres["control"]["table_row_delete_disable"]` (default on: the API then answers "users delete blocked in the database"). The root user (`id` 1) is never deleted.
+
+## 5. OTP Flow
 
 For OTP logins, the client requests a verification code and then submits it:
 1. **Send**: `POST /public/otp-send-email` or `/public/otp-send-mobile` → `func_otp_generate` creates a random code of length `config_otp_length`, the configured provider sends it, and only then `func_otp_save` stores it in the `otp` table (valid for `config_otp_expiry_sec`). A failed send stores nothing.
@@ -116,7 +141,7 @@ For OTP logins, the client requests a verification code and then submits it:
 
 ---
 
-## 5. JWT Tokens (`func_token_encode` / `func_token_decode`)
+## 6. JWT Tokens (`func_token_encode` / `func_token_decode`)
 
 Atom generates HS256 JWT pairs signed with `config_token_secret_key`:
 ```json
@@ -144,7 +169,7 @@ async def func_api_my_profile(*, request: Request):
 
 ---
 
-## 6. Root Superadmin User Architecture
+## 7. Root Superadmin User Architecture
 
 Atom features an automatic superadministrator (**root user**) with `role: 1` that is seeded on startup and defended by database triggers:
 

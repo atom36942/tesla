@@ -3,13 +3,27 @@
 Practical answers to common "how do I…" questions. Open a question for the steps, examples, and links to the full documentation.
 
 <details>
-<summary><strong>How do I disable user deletion while keeping other object deletion enabled?</strong></summary>
+<summary><strong>How do I enable or disable user deletion?</strong></summary>
 
-Set `config_is_user_delete = False` in `config.py` (or your `config_extend.py` override), then restart the app.
+User deletion is **off by default** and needs **two switches**, because Atom guards the `users` table twice: once in the API and once with a database trigger.
 
-This blocks `table="users"` on both `/my/object-delete` and `/admin/object-delete`. Other tables remain deletable under their normal permissions. This setting applies to both self-account and admin user deletion; it is not a self-deletion-only switch.
+| Switch | Where | Default | To enable deletion |
+|---|---|---|---|
+| `config_is_user_delete` | `.env` | `false` | `config_is_user_delete=true` |
+| `users` in `table_row_delete_disable` | `config_postgres["control"]` | listed (trigger blocks every `DELETE` on `users`) | remove `users` from the list in `config_extend.py` (below), then restart |
 
-When enabled, user deletion accepts exactly one ID. `/my/object-delete` requires the logged-in user's ID; `/admin/object-delete` requires administrator access. Send a POST body such as `{"table": "users", "ids": [7]}`. Omit the `ownership_column` query parameter for self-account deletion; explicitly supplying it is rejected. Bulk deletion of `users` is always blocked.
+```python
+# config_extend.py, under # atom
+config_postgres = {
+**base_config_postgres,
+"table": {**base_config_postgres["table"]},
+"control": {**base_config_postgres["control"], "table_row_delete_disable": [t for t in base_config_postgres["control"]["table_row_delete_disable"] if t != "users"]},
+}
+```
+
+With only the first switch on, the delete APIs answer `users delete blocked in the database: remove users from config_postgres control table_row_delete_disable`. Leave either switch off to keep users undeletable; other tables are unaffected.
+
+Users are deleted only through `DELETE /my/user-delete` (own account, token only) and `DELETE /admin/user-delete?id=7` (one user). The root user (`id` 1) is never deleted. The generic `/my/object-delete` and `/admin/object-delete` always refuse `table=users`.
 
 </details>
 
@@ -227,7 +241,7 @@ When `"is_active": False` is set, the HTTP middleware checks it immediately via 
 
 Role **`1`** is the administrator role. On startup, Atom seeds the root administrator using `config_root_user_password`; override that value with a strong secret in `.env` before deploying.
 
-To promote an existing user, authenticate as an administrator and update that user's `role` to `1` through `/admin/object-update` on the `users` table. Confirm the target user ID first—admin routes can access and modify data across users.
+To promote an existing user, authenticate as an administrator and call `PUT /admin/user-update` with `{"id": 7, "role": 1}`. Confirm the target user ID first—admin routes can access and modify data across users.
 
 Public signup cannot create role `1` users, which prevents callers from granting themselves administrator access.
 

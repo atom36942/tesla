@@ -38,8 +38,8 @@ from concurrent.futures import ThreadPoolExecutor
 # config
 
 # setting
-# Atom's version: raised (with a vX.Y.Z tag) only when releasing; a project's sync.py shows the version it has
-ATOM_VERSION = "1.0.0"
+# Atom's version: raised by hand when a change is worth a new number (no tags); a project's sync.py shows the version it has
+ATOM_VERSION = "2.0.0"
 REPO_URL = "https://github.com/atom36942/atom.git"
 # Single files replaced from upstream on every sync.
 SYNC_FILES = [
@@ -539,7 +539,7 @@ def bootstrap_sync(*, root, repo_url=REPO_URL, is_venv_sync=True, is_outdated_ch
                 atomic_write(path=script, content=previous[0], mode=previous[1])
             raise
         if result.returncode:
-            raise ValueError(f"Latest Atom updater failed (exit {result.returncode}); review the working tree before retrying")
+            raise ValueError(f"Latest Atom updater failed (exit {result.returncode}). sync.py now shows Atom {atom_version(source=source) or 'unknown'}, but the other files may not be updated: review the working tree, then run python3 sync.py again")
 
 def apply_bootstrapped_revision(*, root, revision, is_venv_sync=True, is_outdated_check=True):
     """Internal child entry: validate the parent lock and pinned updater source."""
