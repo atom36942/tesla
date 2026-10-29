@@ -1,0 +1,2 @@
+# function_extend
+Business logic: `<feature>.py` (a big feature may split into `<feature>_<part>.py`) with keyword-only `func_*` functions, available as `app_state.func_*`; names are unique across Atom and the project. Optional `func_extend(*, app_state)` runs at startup and `func_extend_shutdown(*, app_state)` at shutdown. Reuse Atom's clients (`app_state.client_*`) and `func_*` helpers before writing your own. See AGENTS.md (Functions, Reuse Atom).

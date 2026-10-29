@@ -1,0 +1,2 @@
+# script_extend
+Project scripts and jobs: one `.py` per job with sections `# command`, `# info`, `# import`, `# config` (values from `config.py` or the environment only), `# setting`, `# logic`, `# main`. Imports stdlib, packages, `config`, `function` and the project's `function_extend`/`files_extend` (move helpers there when a script grows); runtime data in `tmp/<script>/`, deleted on success. See AGENTS.md (Style).
