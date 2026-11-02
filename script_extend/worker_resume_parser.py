@@ -1,6 +1,6 @@
 # command: venv/bin/python -m script_extend.worker_resume_parser
 
-# info: Polls resume files from S3/Azure storage and parses them with LLM providers into PostgreSQL.
+# info: Polls jobseeker rows with a resume (S3/Azure link or stored text) and fills their profile with Gemini.
 
 # import
 import asyncio
@@ -14,21 +14,18 @@ from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
 from pathlib import Path
-import aiohttp
 import asyncpg
 import boto3
+import httpx
 from azure.storage.blob import BlobSasPermissions
 from azure.storage.blob import generate_blob_sas
 from google.genai import types
 from dotenv import load_dotenv
-from config import config_ai_services
 from function import func_client_postgres
-from function import func_client_openai
 from function import func_client_gemini
 
 # config
 load_dotenv(".env")
-config_openai_key = os.getenv("config_openai_key")
 config_gemini_key = os.getenv("config_gemini_key")
 config_azure_account_name = os.getenv("config_azure_account_name")
 config_azure_account_key = os.getenv("config_azure_account_key")
@@ -37,7 +34,6 @@ config_aws_secret_access_key = os.getenv("config_aws_secret_access_key")
 postgres_url_master = os.getenv("config_postgres_url_master")
 
 # setting
-AI_SERVICE = "gemini"
 TABLE_NAME = "jobseeker"
 BASE_COLUMNS = {"id", "created_at", "created_by_id", "updated_at", "updated_by_id", "deleted_at", "deleted_by_id", "deactivated_at", "deactivated_by_id", "verified_at", "verified_by_id", "resume_url", "resume_content", "status", "worker_status", "worker_last_error", "metadata", "worker_retry_count", "worker_next_retry_at", "worker_processed_at", "rating", "remark"}
 BATCH_LIMIT = 100
@@ -63,12 +59,10 @@ INSTRUCTIONS:
 def retry_delay_sec(*, retry_count: int) -> int:
     return WORKER_RETRY_DELAY_SEC[min(max(retry_count, 0), len(WORKER_RETRY_DELAY_SEC) - 1)]
 
-def ai_client_open(*, ai_service: str, ai_service_list: list, openai_key: str, gemini_key: str):
-    """The Gemini client the worker parses with; exits when the chosen service isn't usable."""
-    if ai_service not in ai_service_list: raise SystemExit(f"Error: AI_SERVICE must be one of {ai_service_list}.")
-    client_openai, client_gemini = func_client_openai(api_key=openai_key), func_client_gemini(api_key=gemini_key)
-    if ai_service == "gemini" and not client_gemini: raise SystemExit("Error: config_gemini_key is not set. Worker requires Gemini.")
-    if ai_service == "openai" and not client_openai: raise SystemExit("Error: config_openai_key is not set. Worker requires OpenAI.")
+def ai_client_open(*, gemini_key: str):
+    """The Gemini client the worker parses with; exits when config_gemini_key is not set."""
+    client_gemini = func_client_gemini(api_key=gemini_key)
+    if not client_gemini: raise SystemExit("Error: config_gemini_key is not set. Worker requires Gemini.")
     return client_gemini
 
 async def column_read(*, pool) -> dict:
@@ -139,9 +133,9 @@ async def resume_download(*, url: str, download_url: str, candidate_id: int) -> 
     fd, file_path = tempfile.mkstemp(prefix=f"resume_parser_{candidate_id}_", suffix=ext if ext in RESUME_EXTENSIONS else ".pdf", dir=TMP_DIR)    # unique name, so concurrent downloads never collide
     os.close(fd)
     try:
-        async with aiohttp.ClientSession() as session, session.get(download_url) as resp:
-            if resp.status != 200: raise Exception(f"HTTP {resp.status} downloading {url}")
-            file_bytes = await resp.read()
+        async with httpx.AsyncClient(follow_redirects=True, timeout=60) as client: resp = await client.get(download_url)
+        if resp.status_code != 200: raise Exception(f"HTTP {resp.status_code} downloading {url}")
+        file_bytes = resp.content
         await asyncio.to_thread(Path(file_path).write_bytes, file_bytes)    # other resumes keep parsing meanwhile
     except Exception as e:
         with contextlib.suppress(FileNotFoundError): os.remove(file_path)
@@ -212,9 +206,9 @@ async def worker_loop(*, postgres_url, client_gemini, storage):
         await pool.close()
 
 def main():
-    client_gemini = ai_client_open(ai_service=AI_SERVICE, ai_service_list=config_ai_services, openai_key=config_openai_key, gemini_key=config_gemini_key)
+    client_gemini = ai_client_open(gemini_key=config_gemini_key)
     storage = {"azure_account_name": config_azure_account_name, "azure_account_key": config_azure_account_key, "aws_access_key_id": config_aws_access_key_id, "aws_secret_access_key": config_aws_secret_access_key}
-    print(f"Starting Dynamic Resume Parser Worker Script... ai={AI_SERVICE} batch_limit={BATCH_LIMIT} concurrency_limit={CONCURRENCY_LIMIT}")
+    print(f"Starting Dynamic Resume Parser Worker Script... model={GEMINI_MODEL} batch_limit={BATCH_LIMIT} concurrency_limit={CONCURRENCY_LIMIT}")
     asyncio.run(worker_loop(postgres_url=postgres_url_master, client_gemini=client_gemini, storage=storage))
 
 # main
