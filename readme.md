@@ -26,14 +26,26 @@ venv/bin/uvicorn main:app --reload
 Windows: [docs/windows.md](docs/windows.md)
 
 # Env
+Atom starts without `.env`: pages, `/health` and routes that don't use the database work.
+
+Required for the database, users and login:
 ```env
 config_postgres_url_master=postgresql://postgres:postgres@localhost:5432/postgres
 config_root_user_password=your-strong-root-password
 config_token_secret_key=your-secret-key-at-least-32-chars
-config_signup_allowed_roles=[2]
-config_is_prod=false
+```
+
+Optional:
+```env
 config_is_pgweb_enabled=true
+config_is_prod=false
+config_signup_allowed_roles=[2]
+config_root_html_path=static_extend/<app>/index.html
+config_cors_allow_origins=["http://localhost:5173"]
 config_redis_url_api_response=redis://localhost:6379/0
+config_redis_url_user_state=redis://localhost:6379/0
+config_redis_url_ratelimiter=redis://localhost:6379/0
+config_redis_url_queue=redis://localhost:6379/0
 ```
 
 Details: [docs/config.md](docs/config.md)
