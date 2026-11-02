@@ -10,9 +10,9 @@ import os
 import tempfile
 import time
 import urllib.parse
+from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
-from datetime import UTC
 from pathlib import Path
 import aiohttp
 import asyncpg
@@ -20,20 +20,21 @@ import boto3
 from azure.storage.blob import BlobSasPermissions
 from azure.storage.blob import generate_blob_sas
 from google.genai import types
+from dotenv import load_dotenv
+from config import config_ai_services
 from function import func_client_postgres
 from function import func_client_openai
 from function import func_client_gemini
 
 # config
-from config import config_postgres_url_dict
-from config import config_openai_key
-from config import config_gemini_key
-from config import config_ai_services
-from config import config_azure_account_name
-from config import config_azure_account_key
-from config import config_aws_access_key_id
-from config import config_aws_secret_access_key
-postgres_url_master = config_postgres_url_dict.get("master")
+load_dotenv(".env")
+config_openai_key = os.getenv("config_openai_key")
+config_gemini_key = os.getenv("config_gemini_key")
+config_azure_account_name = os.getenv("config_azure_account_name")
+config_azure_account_key = os.getenv("config_azure_account_key")
+config_aws_access_key_id = os.getenv("config_aws_access_key_id")
+config_aws_secret_access_key = os.getenv("config_aws_secret_access_key")
+postgres_url_master = os.getenv("config_postgres_url_master")
 
 # setting
 AI_SERVICE = "gemini"
