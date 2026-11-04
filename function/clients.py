@@ -1,4 +1,5 @@
 # import
+from contextlib import asynccontextmanager
 from contextlib import suppress
 import asyncpg
 import httpx
@@ -15,12 +16,26 @@ def func_client_http():
     """Initialize HTTP async client."""
     return httpx.AsyncClient()
 
+def func_client_pool_size(*, app_state: State, db: str, name: str) -> dict:
+    """{"min_size", "max_size"} of one database's pool: config_<db>_pool_min_size_<name> / config_<db>_pool_max_size_<name> when set, else the shared config_<db>_pool_min_size / config_<db>_pool_max_size. db: postgres or mssql."""
+    return {f"{size}_size": int(getattr(app_state, f"config_{db}_pool_{size}_size_{name}", None) or getattr(app_state, f"config_{db}_pool_{size}_size")) for size in ("min", "max")}
+
 async def func_client_postgres(*, dsn: str, min_size: int = 5, max_size: int = 20, is_read_only: bool = False):
-    """Initialize a single asyncpg Postgres connection pool."""
+    """Initialize a single asyncpg Postgres connection pool. A released connection skips asyncpg's reset query (RESET ALL, UNLISTEN, unlock): Atom's code leaves no session state, an open transaction is still rolled back, and SQL someone typed runs through func_postgres_acquire_clean, so each request saves a round trip."""
     if not dsn: return None
-    pool_kwargs = {"min_size": min_size, "max_size": max_size}
+    async def keep_session(conn): return None
+    pool_kwargs = {"min_size": min_size, "max_size": max_size, "reset": keep_session}
     if is_read_only: pool_kwargs["server_settings"] = {"default_transaction_read_only": "on"}
     return await asyncpg.create_pool(dsn=dsn, **pool_kwargs)
+
+@asynccontextmanager
+async def func_postgres_acquire_clean(*, client_postgres: asyncpg.Pool):
+    """Borrow a pool connection for SQL someone typed (query runners, pgweb): its session (SET, SET ROLE, advisory locks, LISTEN) is reset before it goes back, and a connection that cannot be reset is closed."""
+    async with client_postgres.acquire() as conn:
+        try: yield conn
+        finally:
+            try: await conn.reset(timeout=5)
+            except Exception: conn.terminate()
 
 def func_client_redis(*, url: str):
     """Initialize a single Redis connection pool."""
@@ -113,11 +128,12 @@ async def func_client_rabbitmq(*, url: str):
     channel = await connection.channel()
     return connection, channel
 
-async def func_client_sftp(*, host: str, port: int, username: str, password: str):
-    """Initialize SFTP asyncssh connection."""
+async def func_client_sftp(*, host: str, port: int, username: str, password: str, known_hosts_path: str | None = None, is_host_verify: bool = True):
+    """Initialize SFTP asyncssh connection. The server's key is checked against known_hosts_path (default ~/.ssh/known_hosts), so a server pretending to be it is refused; is_host_verify=False skips the check."""
     if not host: return None
     import asyncssh
-    return await asyncssh.connect(host=host, port=int(port), username=username, password=password, known_hosts=None)
+    known_hosts = (known_hosts_path or ()) if is_host_verify else None    # () is asyncssh's default file
+    return await asyncssh.connect(host=host, port=int(port), username=username, password=password, known_hosts=known_hosts)
 
 def func_client_azure_email(*, connection_string: str):
     """Initialize Azure EmailClient."""
@@ -149,7 +165,7 @@ def func_client_msgraph(*, tenant_id: str, client_id: str, client_secret: str, s
 async def func_client_close(*, app_state: State = None, clients: dict = None) -> None:
     """Safely disconnect and close all active database, storage, messaging, and AI clients."""
     c = {}
-    if app_state: c = {k: getattr(app_state, k, None) for k in dir(app_state) if k.startswith("client_")}
+    if app_state: c = {k: v for k, v in (getattr(app_state, "_state", None) or vars(app_state)).items() if k.startswith("client_")}    # Starlette's State keeps its values in _state, which dir() doesn't list
     elif isinstance(clients, dict): c = clients.copy()
     client_http = c.get("client_http")
     if client_http:

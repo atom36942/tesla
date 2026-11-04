@@ -3,6 +3,7 @@ import asyncio
 import gzip
 import ipaddress
 import re
+import secrets
 import sys
 import time
 import traceback
@@ -30,6 +31,23 @@ def func_api_error(*, message: str, status_code: int) -> Exception:
     error.status_code = status_code
     return error
 
+def func_middleware_body_limit(*, scope: dict, receive: Any, config_request_body_max_kb: int, config_request_form_max_kb: int) -> Any:
+    """Wrap receive so a request body over its limit is refused with 413 before it fills memory: config_request_form_max_kb for multipart uploads (files go to disk past 1 MB), config_request_body_max_kb for everything else (JSON is held in memory, and parsing it takes several times its size). A declared Content-Length over the limit is refused before any of the body is read; a body without one is counted as it arrives."""
+    headers = dict(scope.get("headers") or [])
+    limit = (config_request_form_max_kb if headers.get(b"content-type", b"").startswith(b"multipart/form-data") else config_request_body_max_kb) * 1024
+    try: declared = int(headers.get(b"content-length", b"0"))
+    except ValueError: declared = 0
+    received = 0
+    async def receive_limited():
+        nonlocal received
+        if declared > limit: raise func_api_error(message=f"request body too large, limit {limit // 1024} KB", status_code=413)
+        message = await receive()
+        if message["type"] == "http.request":
+            received += len(message.get("body", b""))
+            if received > limit: raise func_api_error(message=f"request body too large, limit {limit // 1024} KB", status_code=413)
+        return message
+    return receive_limited
+
 async def func_middleware_check_active(*, is_active: bool = True) -> None:
     """Check whether current API endpoint is active/enabled."""
     if not is_active: raise func_api_error(message="API endpoint is disabled", status_code=404)
@@ -47,13 +65,27 @@ async def func_middleware_check_token(*, user_dict: dict, url_path: str, is_toke
             raise func_api_error(message="access token required", status_code=401)
     return
 
-async def func_middleware_check_user_deactivated(*, user_dict: dict, user_check_deactivated: Any, client_postgres: asyncpg.Pool | None, client_redis: Redis | None, cache_users_deactivated: dict, config_redis_cache_ttl_sec: int) -> None:
+def func_middleware_user_row_reader(*, client_postgres: asyncpg.Pool | None, user_dict: dict) -> Any:
+    """One users-row read per request, shared by the role, deactivated and deleted checks: the first check that needs the database runs it, the others reuse the row."""
+    row = {}
+    async def read():
+        if "value" not in row:
+            if not client_postgres: raise func_api_error(message="postgres client missing", status_code=500)
+            async with client_postgres.acquire() as conn:
+                rows = await conn.fetch("select role, deactivated_at, deleted_at from users where id=$1", user_dict["id"])
+            if not rows: raise func_api_error(message="user not found", status_code=401)
+            row["value"] = rows[0]
+        return row["value"]
+    return read
+
+async def func_middleware_check_user_deactivated(*, user_dict: dict, user_check_deactivated: Any, client_postgres: asyncpg.Pool | None, client_redis: Redis | None, cache_users_deactivated: dict, config_redis_cache_ttl_sec: int, user_row_read: Any = None) -> None:
     """Check if the user is deactivated using a strictly configured mode from config_api."""
     cfg = user_check_deactivated
     if not cfg or not user_dict: return
     mode = cfg.get("mode") if isinstance(cfg, dict) else (cfg[0] if isinstance(cfg, (list, tuple)) else None)
     if not mode: return
     async def fetch_deactivated_status(uid):
+        if user_row_read: return (await user_row_read())["deactivated_at"]
         if not client_postgres: raise func_api_error(message="postgres client missing", status_code=500)
         async with client_postgres.acquire() as conn:
             rows = await conn.fetch("select id, deactivated_at from users where id=$1", uid)
@@ -82,13 +114,14 @@ async def func_middleware_check_user_deactivated(*, user_dict: dict, user_check_
     if active_status == "absent": raise func_api_error(message="missing deactivated_at", status_code=500)
     if active_status is not None: raise func_api_error(message="user not active", status_code=403)
 
-async def func_middleware_check_user_deleted(*, user_dict: dict, user_check_deleted: Any, client_postgres: asyncpg.Pool | None, client_redis: Redis | None, cache_users_deleted: dict, config_redis_cache_ttl_sec: int) -> None:
+async def func_middleware_check_user_deleted(*, user_dict: dict, user_check_deleted: Any, client_postgres: asyncpg.Pool | None, client_redis: Redis | None, cache_users_deleted: dict, config_redis_cache_ttl_sec: int, user_row_read: Any = None) -> None:
     """Check if the user is deleted using a strictly configured mode from config_api."""
     cfg = user_check_deleted
     if not cfg or not user_dict: return
     mode = cfg.get("mode") if isinstance(cfg, dict) else (cfg[0] if isinstance(cfg, (list, tuple)) else None)
     if not mode: return
     async def fetch_deleted(uid):
+        if user_row_read: return (await user_row_read())["deleted_at"]
         if not client_postgres: raise func_api_error(message="postgres client missing", status_code=500)
         async with client_postgres.acquire() as conn:
             rows = await conn.fetch("select deleted_at from users where id=$1", uid)
@@ -117,7 +150,7 @@ async def func_middleware_check_user_deleted(*, user_dict: dict, user_check_dele
     if deleted_status == "absent": raise func_api_error(message="missing deleted_at", status_code=500)
     if deleted_status is not None: raise func_api_error(message="user is deleted", status_code=403)
 
-async def func_middleware_check_role(*, user_dict: dict, user_check_role: Any, client_postgres: asyncpg.Pool | None, client_redis: Redis | None, cache_users_role: dict, config_redis_cache_ttl_sec: int) -> None:
+async def func_middleware_check_role(*, user_dict: dict, user_check_role: Any, client_postgres: asyncpg.Pool | None, client_redis: Redis | None, cache_users_role: dict, config_redis_cache_ttl_sec: int, user_row_read: Any = None) -> None:
     """Ensure sufficient roles to access endpoints using a strictly configured mode from config_api."""
     cfg = user_check_role
     if not cfg: return
@@ -132,6 +165,7 @@ async def func_middleware_check_role(*, user_dict: dict, user_check_role: Any, c
         return
     roles = {int(role) for role in raw_roles}
     async def fetch_role(uid):
+        if user_row_read: return (await user_row_read())["role"]
         if not client_postgres: raise func_api_error(message="postgres client missing", status_code=500)
         async with client_postgres.acquire() as conn:
             rows = await conn.fetch("select role from users where id=$1", uid)
@@ -207,8 +241,8 @@ def func_middleware_postgres_select(*, client_postgres_dict: dict, cache_postgre
     if name not in client_postgres_dict and name != "master": raise func_api_error(message=f"connection '{name}' not found", status_code=404)
     return client_postgres_dict.get(name), cache_postgres_schema_dict.get(name, {})
 
-async def func_middleware_api_cache(*, mode: str, path: str, query_params: dict, cache: Any = None, api_cache_sec: Any = None, client_redis: Redis | None = None, user_id: int = 0, cache_api_response: dict = None, response: Any = None, is_gzip_accepted: bool = False) -> Any:
-    """Get or set middleware API cache for a request. Bodies are stored gzipped; a hit is sent still gzipped when the client accepts gzip (no decompress, fewer bytes)."""
+async def func_middleware_api_cache(*, mode: str, path: str, query_params: dict, cache: Any = None, api_cache_sec: Any = None, client_redis: Redis | None = None, user_id: int = 0, cache_api_response: dict = None, response: Any = None, is_gzip_accepted: bool = False, config_api_cache_inmemory_max_kb: int = 102400) -> Any:
+    """Get or set middleware API cache for a request. Bodies are stored gzipped; a hit is sent still gzipped when the client accepts gzip (no decompress, fewer bytes). The inmemory cache holds at most config_api_cache_inmemory_max_kb of stored bodies per worker: over it, the oldest entries are dropped (they are read from the route again on their next request)."""
     if mode not in ("get", "set"): raise func_api_error(message=f"invalid cache operation: {mode}, allowed: get, set", status_code=500)
     cfg = cache if cache is not None else api_cache_sec
     if isinstance(cfg, dict):
@@ -237,7 +271,11 @@ async def func_middleware_api_cache(*, mode: str, path: str, query_params: dict,
     body = getattr(response, "body", None) or b"".join([chunk async for chunk in response.body_iterator])
     comp = gzip.compress(body, compresslevel=1)    # stored as raw bytes: level 1 is several times faster than the default 9 for JSON of this size
     if cache_mode == "redis": await client_redis.setex(key, ttl, comp)
-    else: cache_api_response[key] = {"data": comp, "expire_at": time.time() + ttl}
+    else:
+        cache_api_response.pop(key, None)    # a re-set entry counts as the newest
+        cache_api_response[key] = {"data": comp, "expire_at": time.time() + ttl}
+        total, limit = sum(len(item["data"]) for item in cache_api_response.values()), config_api_cache_inmemory_max_kb * 1024
+        while total > limit: total -= len(cache_api_response.pop(next(iter(cache_api_response)))["data"])    # dicts keep insertion order: the first is the oldest
     response = Response(content=body, status_code=response.status_code, media_type=response.media_type, headers=dict(response.headers))
     response.is_cache_set = True
     return response
@@ -301,7 +339,7 @@ def _redact_error_message(message):
     return re.sub(r"((?:password|passwd|secret|token|api[_-]?key|access[_-]?key|sig)\s*[=:]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s&;,]+)", r"\1[REDACTED]", message, flags=re.IGNORECASE)
 
 
-async def func_middleware_api_response_error(*, exception: Exception, is_traceback: bool, sentry_dsn: str) -> tuple:
+async def func_middleware_api_response_error(*, exception: Exception, is_traceback: bool, sentry_dsn: str, request_id: str | None = None) -> tuple:
     """Central API error handler: formats database, client, and system exceptions into a standard JSON response."""
     import botocore.exceptions
     # Plain Exception stays 400; func_api_error and known infrastructure failures get their real status.
@@ -359,18 +397,23 @@ async def func_middleware_api_response_error(*, exception: Exception, is_traceba
     error_msg = _redact_error_message(error_msg)
     # a full traceback only for server errors (5xx); a client error (4xx: bad token, invalid input) is one line
     if is_traceback and status_code >= 500: traceback.print_tb(exception.__traceback__)
-    if is_traceback: print(f"{status_code} {type(exception).__name__}: {error_msg}", file=sys.stderr)
+    if is_traceback: print(f"{status_code} {type(exception).__name__}: {error_msg}" + (f" (request {request_id})" if request_id else ""), file=sys.stderr)
     if sentry_dsn:
         import sentry_sdk
-        sentry_sdk.capture_exception(exception)
+        sentry_sdk.capture_exception(exception, tags={"request_id": request_id} if request_id else None)
     return error_msg, responses.JSONResponse(status_code=status_code, content={"status": 0, "message": error_msg})
 
 async def func_middleware_log_api_write(*, app_state: Any, request: Request, response_type: str, status_code: int | None, start: float, error: str | None) -> None:
     """Buffer one log_api row for a finished request; skipped when read-only or no log_api database, and write errors are counted, never raised."""
     if app_state.config_is_read_only or not getattr(app_state, "client_postgres_log_api", None): return
-    try: await app_state.func_postgres_create(client_postgres=app_state.client_postgres_log_api, client_postgres_conn=None, client_password_hasher=app_state.client_password_hasher, cache_postgres_schema=app_state.cache_postgres_schema_dict.get(app_state.config_postgres_db_log_api, {}), buffer_postgres=app_state.buffer_postgres_log_api, buffer_rows_max=app_state.config_buffer_rows_max, buffer_full_mode="drop_oldest", runtime_error_count=app_state.runtime_error_count, is_trusted=True, config_column_regex=app_state.config_column_regex, buffer_limit=app_state.config_table.get("log_api", {}).get("buffer_limit", app_state.config_buffer_limit_default), mode="buffer", table="log_api", obj_list=[{"created_by_id": request.state.user.get("id") if getattr(request.state, "user", None) else None, "response_type": response_type, "ip_address": func_middleware_client_ip(request=request), "path": request.scope["path"], "method": request.method, "query_param": func_middleware_log_query_params(query_params=request.query_params), "status_code": status_code, "response_time_ms": int((time.perf_counter() - start) * 1000), "error": error}])
+    try: await app_state.func_postgres_create(client_postgres=app_state.client_postgres_log_api, client_postgres_conn=None, client_password_hasher=app_state.client_password_hasher, cache_postgres_schema=app_state.cache_postgres_schema_dict.get(app_state.config_postgres_db_log_api, {}), buffer_postgres=app_state.buffer_postgres_log_api, buffer_rows_max=app_state.config_buffer_rows_max, buffer_full_mode="drop_oldest", runtime_error_count=app_state.runtime_error_count, is_trusted=True, config_column_regex=app_state.config_column_regex, buffer_limit=app_state.config_table.get("log_api", {}).get("buffer_limit", app_state.config_buffer_limit_default), mode="buffer", table="log_api", obj_list=[{"created_by_id": request.state.user.get("id") if getattr(request.state, "user", None) else None, "response_type": response_type, "ip_address": func_middleware_client_ip(request=request), "path": request.scope["path"], "method": request.method, "query_param": func_middleware_log_query_params(query_params=request.query_params), "status_code": status_code, "response_time_ms": int((time.perf_counter() - start) * 1000), "error": error, "request_id": getattr(request.state, "request_id", None)}])
     except Exception as e: func_runtime_error_record(runtime_error_count=app_state.runtime_error_count, key="log_api_write", error=e, print_every=100)
     return
+
+def func_middleware_request_id(*, headers: Any) -> str:
+    """This request's id: the caller's or proxy's x-request-id when it is a plain token (8-64 letters, digits, . _ -), else a new random one. Sent back as x-request-id, written to log_api and printed with errors, so a reported failure leads to its log row."""
+    incoming = headers.get("x-request-id", "")
+    return incoming if re.fullmatch(r"[A-Za-z0-9._-]{8,64}", incoming) else secrets.token_hex(8)
 
 def func_middleware_security_headers(*, headers: list) -> list:
     """Return ASGI response headers with the baseline security headers added, keeping any the route already set."""

@@ -61,7 +61,7 @@ Without SQL access, admins can read the same report from `GET /admin/postgres-sl
 
 - `config_uvicorn_workers` starts that many server processes with `python main.py`. A good starting point is the number of CPU cores. See [config.md](config.md).
 - With more than one worker, every `inmemory` cache, rate limit and user check in `config_api` must use `redis` (user checks may also use `realtime` or `token`); startup refuses otherwise.
-- Each worker opens its own pools: up to workers × pools × `config_postgres_pool_max_size` connections. Startup warns when that can exceed Postgres `max_connections`.
+- Each worker opens its own pools: up to workers × the pools' max sizes added up (`config_postgres_pool_max_size`, or `config_postgres_pool_max_size_<name>` for one database). Startup warns when that can exceed Postgres `max_connections`.
 - Start `python main.py` directly. Running `uvicorn main:app --workers N` skips the worker checks and the one-time `tmp/` reset.
 
 ## 5. Token Cache
@@ -101,3 +101,38 @@ FastAPI finds a request's route by checking every route in order, about 0.56 µs
 **Sentry.** `config_sentry_traces_sample_rate` (default `0.05`) sets the share of requests traced and profiled; every error is still sent. It was 100% of requests before.
 
 **Not adopted, measured:** `hiredis` made each Redis command slower with redis-py's async client (about 72 vs 45 µs per GET), and parsing request bodies with orjson silently turns integers above 64 bits into rounded floats, so both stay out. Skipping asyncpg's connection reset on pool release (a `reset=` no-op) saved one round trip per query and gained only 5–10% on database reads, with worse p95; it would also let session state (a `SET`, a held advisory lock) leak to the next request, so the reset stays.
+
+## 12. Round Trips, Bulk Writes and Compression
+
+Measured on one machine with a local PostgreSQL; on a remote database the saved round trips are worth more.
+
+**One users query per request (3.1).** The role, deactivated and deleted checks share `func_middleware_user_row_reader`: a route with all three in `realtime` mode makes one query instead of three (4,450 vs 1,742 checks/s one at a time; p95 1.1 vs 3.3 ms at 20 concurrent).
+
+**Exports continue after the last id (3.2).** `func_postgres_read_export` sorted by `id` reads each batch with `func_postgres_read(after_id=...)` instead of a growing `OFFSET`: 50,000 rows in 58 vs 137 ms, slowest batch 1.3 vs 4.9 ms, and no repeated or skipped rows while data changes.
+
+**Bulk updates through `unnest` (3.3).** `func_postgres_update` sends each column of simple type as one array joined on `id` instead of a `CASE` per column, which grew with the square of the batch: 1,000 rows in 11.4 vs 24.7 ms.
+
+**Converters built once per call (3.4).** `func_postgres_serialize` works out each column's converter on its first value: 1,000 rows x 5 columns convert in 1.4 vs 8.2 ms; a 1,000-row create 7.6 vs 14.5 ms, update 8 vs 13.7 ms.
+
+**Gzip responses (3.5).** `func_app_gzip_add` gzips responses over 1 KB at level 1 when the client sends `Accept-Encoding: gzip` (browsers always do); already encoded responses (cache hits), event streams and files that are compressed already (images, audio, video, zip, fonts, PDF, Office files; 3.5.1) pass through. 1,000 real rows: 251 KB to 16 KB (quotation, 11 columns) and 738 KB to 54 KB (portal, 26 columns), for 0.4 to 2.6 ms of server time; at 20 Mbit/s the portal page arrives in about 22 instead of 300 ms.
+
+**Startup schema check (3.6).** `func_postgres_schema_init` read each table's columns and indexes separately, dropped every table's triggers and recreated them, one statement at a time and outside a transaction. It now reads the whole catalog once, recreates a trigger only when its definition differs, and applies everything in one transaction. An unchanged start runs 14 queries instead of 98: 13 vs 25 ms on a local database, and 1.0 vs 7.1 s with 70 ms per query (a remote database such as Azure, where Pulse took 7.4 s). Delete guards no longer disappear for other sessions during a start, and an unchanged start takes no table locks.
+
+**No reset query on release (3.7).** asyncpg sent `SELECT pg_advisory_unlock_all(); CLOSE ALL; UNLISTEN *; RESET ALL;` every time a connection went back to the pool, and the request waited for it. `func_client_postgres` pools now skip it: on Pulse's Azure database a one-query request took 61 instead of 102 ms, and login, `/my/object-read` and `/my/object-create` each make one round trip less. An open transaction is still rolled back on release. SQL someone typed (`/admin/postgres-query-runner-*`, pgweb query and stream) runs through `func_postgres_acquire_clean`, which resets that session before it goes back, and the advisory-lock helpers close a connection whose lock cannot be released.
+
+**Creates without a transaction wrapper (3.8).** `func_postgres_create` wrapped every create in `BEGIN`/`COMMIT`, and the bulk insert added a `SAVEPOINT` inside it, although up to 5,000 rows is one `INSERT`, all-or-nothing by itself. It now opens a transaction only when a create spans several `INSERT`s and none is open yet. At 50 ms per query: 1 row 52 vs 155 ms, 10 rows 52 vs 258 ms, 1,000 rows 62 vs 269 ms (1 round trip instead of 3 or 5). A failed create still saves no row, in one statement or across several.
+
+**Updates and deletes without a transaction wrapper (3.9).** `func_postgres_update` and `func_postgres_delete` follow the 3.8 rule: one `UPDATE` or `DELETE` statement runs alone, several share one transaction, and a caller's own transaction gets no savepoint. Measured on an Azure PostgreSQL database (Atom's `test` table): update 10 rows 48 vs 143 ms, update 1,000 rows 146 vs 233 ms, delete 2 rows 51 vs 140 ms. The 3.8 creates on the same table: 1 row 48 vs 142 ms, 10 rows 49 vs 238 ms, 1,000 rows 108 vs 303 ms.
+
+**Page files kept by the browser (3.10).** Pages (`/` and `/page/<name>`) are served through `func_app_page_response`, which stamps every `src`/`href` to `/static/<file>` with `?v=<fingerprint of that file>` (worked out once per file, redone when the file changes). A stamped file is sent with `Cache-Control: public, max-age=31536000, immutable` only when its `?v=` is this server's fingerprint of the file (during a rolling deploy an older instance answers the new link with `no-cache`, so no browser keeps an old file under a new address); the page itself and unstamped files still revalidate every load. In the browser, a second load of a page with three local files sent one request (the page, 304) instead of four. Each revalidation it saves cost about 50 ms on a warm connection and 150 ms on a new one (measured on a deployed Atom app on Azure).
+
+
+**pgweb in one round trip per action (3.10.2).** The table list reads the database name, server version and each table's primary key in one query. Opening a table reads its columns and its first page at the same time (the pgweb pool keeps two connections open); the key it guessed from the list is checked against the columns, and the page is read again only when the key changed. Later pages and filters reuse the column types read when the table opened, instead of looking each one up. A reload asks for the table list and the open table together. On Pulse's Azure database (one round trip 47 ms): table list 55 vs 102 ms, opening a table 70 vs 119 ms, next page 67 vs 112 ms, filter 65 vs 115 ms, reload with a table open 69 vs 207 ms.
+
+**Request size limits (3.11).** Atom read a request body of any size into memory before checking it, and parsing JSON takes several times its size: one 300 MB body sent to a public route without a token raised the server from 103 MB to 1,403 MB. `func_middleware_body_limit` now refuses a body over `config_request_body_max_kb` (10 MB) or, for multipart uploads, `config_request_form_max_kb` (100 MB) with `413`: a declared `Content-Length` before any of it is read, a body without one as it arrives. The same 300 MB request now gets `413` in 0.3 s and the server stays at 170 MB.
+
+**Response cache size cap (3.12).** The `inmemory` API response cache dropped entries only when they expired, so a route caching large responses per user or per query could grow until the next cleanup. `config_api_cache_inmemory_max_kb` (100 MB per worker, counting the stored gzipped bodies) now drops the oldest entries when a new one would pass it; counting the size costs about 0.5 ms per cache write at 10,000 entries, and only on a miss.
+
+**Activity written once per 5 minutes (3.12.2).** `/my/profile` (in the background) and `/my/ping` wrote `users.last_active_at` on every call, so every page open by every user wrote a new row version of `users`, ran its row triggers and moved `updated_at`. `func_user_last_active_update` now writes only when the stored time is over 5 minutes old, and a table with `last_active_at` gets `func_set_updated_at_except_activity`, which leaves `updated_at` alone when only `last_active_at` changed. 1,000 page opens by one user (local database): 0.21 vs 0.31 ms each, 1 KB vs 259 KB of WAL.
+
+**RAM history (3.13).** `func_memory_history_periodic_task` reads the worker's RSS once a minute (one `psutil` call, a few microseconds) and keeps the last 1,440 readings (24 hours, about 200 KB), for the monitor's RAM-over-time chart. `/info` answered in 0.49 ms on average with it running.

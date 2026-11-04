@@ -30,13 +30,14 @@ async def func_lifespan(app: FastAPI):
         app.state.runtime_background_tasks = set()
         app.state.runtime_message_socket = {}
         app.state.runtime_error_count = {"log_api_write": 0, "buffer_flush": 0, "buffer_dropped": 0, "background_task": 0, "cleanup": 0}
-        postgres_pool_kwargs = {"min_size": app.state.config_postgres_pool_min_size, "max_size": app.state.config_postgres_pool_max_size, "is_read_only": app.state.config_is_read_only}
+        postgres_pool_kwargs = {"is_read_only": app.state.config_is_read_only}
         aws_kwargs = {"aws_access_key_id": app.state.config_aws_access_key_id, "aws_secret_access_key": app.state.config_aws_secret_access_key}
         cache_api_response = {}
         cache_ratelimiter = {}
         buffer_postgres_create = {}
         buffer_postgres_log_api = {}
         cache_token = OrderedDict()
+        cache_static_version = {}
         cache_atom_version = app.state.func_atom_version()
         print(f"Atom {cache_atom_version or 'version unknown'}", flush=True)
         app.state.func_check(app=app)
@@ -45,10 +46,11 @@ async def func_lifespan(app: FastAPI):
         # client init
         client_password_hasher = app.state.func_client_password_hasher()
         client_http = app.state.func_client_http()
-        client_postgres_dict = {name: await app.state.func_client_postgres(dsn=url, **postgres_pool_kwargs) for name, url in (app.state.config_postgres_url_dict or {}).items() if url}
+        # pool sizes per database: config_<db>_pool_min_size_<name> / config_<db>_pool_max_size_<name> when set, else the shared config_<db>_pool_min_size / config_<db>_pool_max_size
+        client_postgres_dict = {name: await app.state.func_client_postgres(dsn=url, **app.state.func_client_pool_size(app_state=app.state, db="postgres", name=name), **postgres_pool_kwargs) for name, url in (app.state.config_postgres_url_dict or {}).items() if url}
         client_redis_dict = {name: app.state.func_client_redis(url=url) for name, url in (app.state.config_redis_url_dict or {}).items() if url}
         client_mongodb = app.state.func_client_mongodb(url=app.state.config_mongodb_url)
-        client_mssql_dict = {name: await app.state.func_client_mssql(dsn=url, min_size=app.state.config_mssql_pool_min_size, max_size=app.state.config_mssql_pool_max_size, recycle_sec=app.state.config_mssql_pool_recycle_sec) for name, url in (app.state.config_mssql_url_dict or {}).items() if url}
+        client_mssql_dict = {name: await app.state.func_client_mssql(dsn=url, **app.state.func_client_pool_size(app_state=app.state, db="mssql", name=name), recycle_sec=app.state.config_mssql_pool_recycle_sec) for name, url in (app.state.config_mssql_url_dict or {}).items() if url}
         client_clickhouse_dict = {name: await app.state.func_client_clickhouse(dsn=url) for name, url in (app.state.config_clickhouse_url_dict or {}).items() if url}
         client_s3 = await app.state.func_client_s3(region_name=app.state.config_aws_s3_region_name, **aws_kwargs)
         client_s3_resource = app.state.func_client_s3_resource(region_name=app.state.config_aws_s3_region_name, **aws_kwargs)
@@ -60,7 +62,7 @@ async def func_lifespan(app: FastAPI):
         client_celery_producer = app.state.func_client_celery(url=app.state.config_celery_url)
         client_kafka_producer = await app.state.func_client_kafka(url=app.state.config_kafka_url, username=app.state.config_kafka_username, password=app.state.config_kafka_password)
         client_rabbitmq, client_rabbitmq_producer = await app.state.func_client_rabbitmq(url=app.state.config_rabbitmq_url)
-        client_sftp = await app.state.func_client_sftp(host=app.state.config_sftp_host, port=app.state.config_sftp_port, username=app.state.config_sftp_username, password=app.state.config_sftp_password)
+        client_sftp = await app.state.func_client_sftp(host=app.state.config_sftp_host, port=app.state.config_sftp_port, username=app.state.config_sftp_username, password=app.state.config_sftp_password, known_hosts_path=app.state.config_sftp_known_hosts_path, is_host_verify=app.state.config_sftp_is_host_verify)
         client_azure_email = app.state.func_client_azure_email(connection_string=app.state.config_azure_email_connection_string)
         client_azure_sms = app.state.func_client_azure_sms(connection_string=app.state.config_azure_sms_connection_string)
         client_azure_blob = app.state.func_client_azure_blob(account_name=app.state.config_azure_account_name, account_key=app.state.config_azure_account_key)
@@ -70,7 +72,7 @@ async def func_lifespan(app: FastAPI):
         # postgres master
         postgres_master = client_postgres_dict.get("master")
         if postgres_master and not app.state.config_is_read_only and app.state.config_is_postgres_schema_init:
-            async with app.state.func_postgres_advisory_lock(client_postgres=postgres_master, lock_id=3): await app.state.func_postgres_schema_init(app_state=app.state, client_postgres=postgres_master, config_postgres=app.state.config_postgres, root_user_password_hash=client_password_hasher.hash(str(app.state.config_root_user_password)) if app.state.config_root_user_password else None)
+            async with app.state.func_postgres_advisory_lock(client_postgres=postgres_master, lock_id=3): await app.state.func_postgres_schema_init(app_state=app.state, client_postgres=postgres_master, config_postgres=app.state.config_postgres, lock_timeout_sec=app.state.config_postgres_schema_lock_timeout_sec, root_user_password_hash=client_password_hasher.hash(str(app.state.config_root_user_password)) if app.state.config_root_user_password else None)
         postgres_master_schema = await app.state.func_postgres_schema_read(client_postgres=postgres_master) if postgres_master else {}
         cache_config = await app.state.func_postgres_map_column(client_postgres=postgres_master, config_sql=app.state.config_sql.get("config"), is_json_value=True) if postgres_master and "config" in postgres_master_schema else {}
         cache_users_role = await app.state.func_postgres_map_column(client_postgres=postgres_master, config_sql=app.state.config_sql.get("users_role")) if postgres_master else {}
@@ -79,7 +81,7 @@ async def func_lifespan(app: FastAPI):
         # postgres log
         client_postgres_log_api = client_postgres_dict.get(app.state.config_postgres_db_log_api) if app.state.config_is_log_api else None
         if client_postgres_log_api and app.state.config_postgres_db_log_api != "master" and not app.state.config_is_read_only and app.state.config_is_postgres_schema_init:
-            async with app.state.func_postgres_advisory_lock(client_postgres=client_postgres_log_api, lock_id=3): await app.state.func_postgres_schema_tables_init(app_state=app.state, client_postgres=client_postgres_log_api, tables={"log_api": app.state.config_postgres["table"]["log_api"]})
+            async with app.state.func_postgres_advisory_lock(client_postgres=client_postgres_log_api, lock_id=3): await app.state.func_postgres_schema_tables_init(app_state=app.state, client_postgres=client_postgres_log_api, lock_timeout_sec=app.state.config_postgres_schema_lock_timeout_sec, tables={"log_api": app.state.config_postgres["table"]["log_api"]})
         # cache schema
         cache_postgres_schema_dict = {name: postgres_master_schema if name == "master" else await app.state.func_postgres_schema_read(client_postgres=pool) for name, pool in client_postgres_dict.items()}
         cache_clickhouse_schema_dict = {name: await app.state.func_clickhouse_schema_read(client_clickhouse=client) for name, client in client_clickhouse_dict.items()}
@@ -93,6 +95,7 @@ async def func_lifespan(app: FastAPI):
         app.state.func_app_tasks_start(app_state=app.state)
     except Exception as e:
         print(f"❌ startup error: {e}")
+        await app.state.func_client_close(clients={k: v for k, v in locals().items() if k.startswith("client_")})    # close what opened before the failure
         raise
     # shutdown
     yield
@@ -121,15 +124,17 @@ def middleware(asgi_app):
     async def run(scope, receive, send):
         #start
         if scope["type"] != "http" or scope["method"] == "OPTIONS": return await asgi_app(scope, receive, send)
+        app_state = scope["app"].state
+        receive = app_state.func_middleware_body_limit(scope=scope, receive=receive, config_request_body_max_kb=app_state.config_request_body_max_kb, config_request_form_max_kb=app_state.config_request_form_max_kb)
         request = Request(scope, receive)
         start, error, response_type, request.state.user = time.perf_counter(), None, "direct_no_cache_set", {}
-        app_state = scope["app"].state
+        request.state.request_id = app_state.func_middleware_request_id(headers=request.headers)
         sent, capture = {"status": None, "is_started": False}, None
         api_cfg = app_state.config_api.get(scope["path"], {})
         async def send_wrapped(message):
             if message["type"] == "http.response.start":
                 sent["status"], sent["is_started"] = message["status"], True
-                message["headers"] = app_state.func_middleware_security_headers(headers=message.get("headers", []))
+                message["headers"] = [*app_state.func_middleware_security_headers(headers=message.get("headers", [])), (b"x-request-id", request.state.request_id.encode())]
                 if api_cfg.get("cache"): message["headers"].append((b"vary", b"accept-encoding"))    # a cache hit may be sent gzipped, so shared caches must key on it
             elif message["type"] == "http.response.body" and capture is not None: capture.append(message.get("body", b""))
             await send(message)
@@ -150,9 +155,10 @@ def middleware(asgi_app):
             request.state.user = await app_state.func_token_decode(headers=request.headers, config_token_secret_key=app_state.config_token_secret_key, cache_token=app_state.cache_token, config_token_cache_max=app_state.config_token_cache_max)
             # checks
             await app_state.func_middleware_check_token(user_dict=request.state.user, url_path=path, is_token=is_token, user_check_role=user_check_role, user_check_deactivated=user_check_deactivated, user_check_deleted=user_check_deleted)
-            await app_state.func_middleware_check_role(user_dict=request.state.user, user_check_role=user_check_role, client_postgres=app_state.client_postgres_dict.get("master"), client_redis=app_state.client_redis_dict.get("user_state"), cache_users_role=app_state.cache_users_role, config_redis_cache_ttl_sec=app_state.config_redis_cache_ttl_sec)
-            await app_state.func_middleware_check_user_deactivated(user_dict=request.state.user, user_check_deactivated=user_check_deactivated, client_postgres=app_state.client_postgres_dict.get("master"), client_redis=app_state.client_redis_dict.get("user_state"), cache_users_deactivated=app_state.cache_users_deactivated, config_redis_cache_ttl_sec=app_state.config_redis_cache_ttl_sec)
-            await app_state.func_middleware_check_user_deleted(user_dict=request.state.user, user_check_deleted=user_check_deleted, client_postgres=app_state.client_postgres_dict.get("master"), client_redis=app_state.client_redis_dict.get("user_state"), cache_users_deleted=app_state.cache_users_deleted, config_redis_cache_ttl_sec=app_state.config_redis_cache_ttl_sec)
+            user_row_read = app_state.func_middleware_user_row_reader(client_postgres=app_state.client_postgres_dict.get("master"), user_dict=request.state.user)    # one users query per request, whichever checks need it
+            await app_state.func_middleware_check_role(user_dict=request.state.user, user_check_role=user_check_role, client_postgres=app_state.client_postgres_dict.get("master"), client_redis=app_state.client_redis_dict.get("user_state"), cache_users_role=app_state.cache_users_role, config_redis_cache_ttl_sec=app_state.config_redis_cache_ttl_sec, user_row_read=user_row_read)
+            await app_state.func_middleware_check_user_deactivated(user_dict=request.state.user, user_check_deactivated=user_check_deactivated, client_postgres=app_state.client_postgres_dict.get("master"), client_redis=app_state.client_redis_dict.get("user_state"), cache_users_deactivated=app_state.cache_users_deactivated, config_redis_cache_ttl_sec=app_state.config_redis_cache_ttl_sec, user_row_read=user_row_read)
+            await app_state.func_middleware_check_user_deleted(user_dict=request.state.user, user_check_deleted=user_check_deleted, client_postgres=app_state.client_postgres_dict.get("master"), client_redis=app_state.client_redis_dict.get("user_state"), cache_users_deleted=app_state.cache_users_deleted, config_redis_cache_ttl_sec=app_state.config_redis_cache_ttl_sec, user_row_read=user_row_read)
             await app_state.func_middleware_check_ratelimiter(client_redis=app_state.client_redis_dict.get("ratelimiter"), rate_limit=rate_limit, url_path=path, identifier=request.state.user.get("id") if request.state.user else app_state.func_middleware_client_ip(request=request), cache_ratelimiter=app_state.cache_ratelimiter)
             # postgres select
             request.state.client_postgres, request.state.cache_postgres_schema = app_state.func_middleware_postgres_select(client_postgres_dict=app_state.client_postgres_dict, cache_postgres_schema_dict=app_state.cache_postgres_schema_dict, is_connection_param=is_connection_param, connection=request.query_params.get("connection"))
@@ -172,12 +178,12 @@ def middleware(asgi_app):
                 capture = [] if cache and not app_state.func_query_bool_parse(query_params.get("is_disable_cache"), default=False) else None
                 await asgi_app(scope, receive, send_wrapped)
                 if capture is not None and sent["status"] == 200:
-                    await app_state.func_middleware_api_cache(mode="set", path=path, query_params=query_params, response=Response(content=b"".join(capture), status_code=200), cache=cache, client_redis=app_state.client_redis_dict.get("api_response"), user_id=user_id, cache_api_response=app_state.cache_api_response)
+                    await app_state.func_middleware_api_cache(mode="set", path=path, query_params=query_params, response=Response(content=b"".join(capture), status_code=200), cache=cache, client_redis=app_state.client_redis_dict.get("api_response"), user_id=user_id, cache_api_response=app_state.cache_api_response, config_api_cache_inmemory_max_kb=app_state.config_api_cache_inmemory_max_kb)
                     response_type = "direct_cache_set"
         # error
         except Exception as e:
             response_type = "error"
-            error, response = await app_state.func_middleware_api_response_error(exception=e, is_traceback=True, sentry_dsn=app_state.config_sentry_dsn)
+            error, response = await app_state.func_middleware_api_response_error(exception=e, is_traceback=True, sentry_dsn=app_state.config_sentry_dsn, request_id=request.state.request_id)
             # an error after the response started cannot replace it; it is still logged below
             if not sent["is_started"]: await response(scope, receive, send_wrapped)
         # form close (a background request closes its own when the task ends)
@@ -186,6 +192,9 @@ def middleware(asgi_app):
         if api_cfg.get("is_log_api", True): await app_state.func_middleware_log_api_write(app_state=app_state, request=request, response_type=response_type, status_code=sent["status"], start=start, error=error)
     return run
 app.add_middleware(middleware)
+
+# gzip (outside Atom's middleware: it compresses what the route and the cache sent)
+app.state.func_app_gzip_add(app=app)
 
 # cors
 app.state.func_app_cors_add(app=app, allow_origins=app.state.config_cors_allow_origins, allow_origin_regex=app.state.config_cors_allow_origin_regex, allow_methods=app.state.config_cors_allow_methods, allow_headers=app.state.config_cors_allow_headers, expose_headers=app.state.config_cors_expose_headers, allow_credentials=app.state.config_cors_allow_credentials)

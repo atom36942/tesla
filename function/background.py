@@ -78,7 +78,9 @@ async def func_postgres_advisory_lock(*, client_postgres: asyncpg.Pool, lock_id:
     async with client_postgres.acquire(timeout=30) as conn:
         await conn.execute("SELECT pg_advisory_lock(1096044365, $1)", lock_id)
         try: yield
-        finally: await conn.execute("SELECT pg_advisory_unlock(1096044365, $1)", lock_id, timeout=5)
+        finally:
+            try: await conn.execute("SELECT pg_advisory_unlock(1096044365, $1)", lock_id, timeout=5)
+            except Exception: conn.terminate()    # pools skip the reset query, so a lock that cannot be released ends with its session
 
 async def func_cleanup_periodic_task(*, client_postgres: asyncpg.Pool, retention_day: int | None, cleanup, lock_id: int, runtime_error_count: dict) -> None:
     """Run a fixed-table cleanup hourly, with a 30-second budget per run."""
@@ -98,7 +100,8 @@ async def func_cleanup_periodic_task(*, client_postgres: asyncpg.Pool, retention
                         if deleted < 5000: break
                         await asyncio.sleep(0.1)
                 finally:
-                    await conn.execute("SELECT pg_advisory_unlock(1096044365, $1)", lock_id, timeout=5)
+                    try: await conn.execute("SELECT pg_advisory_unlock(1096044365, $1)", lock_id, timeout=5)
+                    except Exception: conn.terminate()    # pools skip the reset query, so a lock that cannot be released ends with its session
         except asyncio.CancelledError: break
         except Exception as e: func_runtime_error_record(runtime_error_count=runtime_error_count, key="cleanup", error=e)
 
@@ -119,10 +122,11 @@ def func_app_tasks_start(*, app_state: State) -> None:
             app_state.runtime_task_otp_cleanup = asyncio.create_task(app_state.func_cleanup_periodic_task(client_postgres=postgres_master, retention_day=app_state.config_otp_retention_day, cleanup=app_state.func_otp_cleanup, lock_id=1, runtime_error_count=app_state.runtime_error_count))
         if client_postgres_log_api is not None and app_state.config_log_api_retention_day is not None:
             app_state.runtime_task_log_api_cleanup = asyncio.create_task(app_state.func_cleanup_periodic_task(client_postgres=client_postgres_log_api, retention_day=app_state.config_log_api_retention_day, cleanup=app_state.func_log_api_cleanup, lock_id=2, runtime_error_count=app_state.runtime_error_count))
+    app_state.runtime_task_memory_history = asyncio.create_task(app_state.func_memory_history_periodic_task(app_state=app_state))
     app_state.runtime_task_inmemory_cache_cleanup = asyncio.create_task(app_state.func_inmemory_cache_cleanup_periodic_task(cache_api_response=app_state.cache_api_response, cache_ratelimiter=app_state.cache_ratelimiter, cache_token=app_state.cache_token, runtime_error_count=app_state.runtime_error_count, interval_sec=app_state.config_inmemory_cache_cleanup_auto_sec))
 
 async def func_app_tasks_stop(*, app_state: State, timeout_sec: int = 5) -> None:
     """Cancel all runtime background tasks and periodic system tasks on app_state."""
     runtime_tasks = list(getattr(app_state, "runtime_background_tasks", set()))
-    periodic_tasks = [getattr(app_state, "runtime_task_postgres_buffer_flush", None), getattr(app_state, "runtime_task_inmemory_cache_cleanup", None), getattr(app_state, "runtime_task_otp_cleanup", None), getattr(app_state, "runtime_task_log_api_cleanup", None)]
+    periodic_tasks = [getattr(app_state, "runtime_task_postgres_buffer_flush", None), getattr(app_state, "runtime_task_inmemory_cache_cleanup", None), getattr(app_state, "runtime_task_otp_cleanup", None), getattr(app_state, "runtime_task_log_api_cleanup", None), getattr(app_state, "runtime_task_memory_history", None)]
     await app_state.func_async_tasks_cancel(task_list=runtime_tasks + periodic_tasks, timeout_sec=timeout_sec)

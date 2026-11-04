@@ -5,6 +5,7 @@ from datetime import UTC
 from datetime import datetime
 from datetime import timedelta
 from importlib import metadata
+from typing import Any
 import asyncpg
 import orjson
 from starlette.datastructures import State
@@ -78,24 +79,19 @@ async def func_monitor_database(*, app_state: State, connection: str, top: int =
     slow_queries = await app_state.func_postgres_slow_queries_read(client_postgres=client_postgres, limit=top, order="total_time")
     return {"connection": connection, "pools": pools, "is_enabled": True, "info": info, "states": [dict(row) for row in states], "long_queries": [dict(row) for row in queries], "tables": [dict(row) for row in tables], "slow_queries": slow_queries}
 
-def func_monitor_failed_jobs(*, path: str = "tmp/consumer_failed_payload.jsonl", latest: int = 20, tail_bytes: int = 512_000) -> dict:
-    """Queue jobs that failed for good (written by the consumer to tmp/): how many, and the latest ones without their payload or traceback."""
-    if not os.path.exists(path): return {"count": 0, "size_bytes": 0, "updated_at": None, "latest": []}
-    stat = os.stat(path)
-    with open(path, "rb") as file:
-        count = sum(chunk.count(b"\n") for chunk in iter(lambda: file.read(1 << 20), b""))
-        file.seek(max(0, stat.st_size - tail_bytes))
-        lines = file.read().splitlines()[-latest:]
-    records = []
-    for line in reversed(lines):
-        try: record = orjson.loads(line)
-        except orjson.JSONDecodeError: continue
-        records.append({"time": record.get("time"), "queue": record.get("queue"), "channel": record.get("channel"), "error_type": record.get("error_type"), "error": str(record.get("error") or "")[:500]})
-    return {"count": count, "size_bytes": stat.st_size, "updated_at": int(stat.st_mtime), "latest": records}
+async def func_monitor_queues(*, client_redis: Any, channels: list) -> dict:
+    """Redis queue backlog per channel: jobs waiting (<channel>), running (<channel>_processing) and kept after their last retry (<channel>_failed), and whether a consumer holds the channel. Channels: Atom's, plus any a consumer has used (found by their key names). Counts only, never payloads."""
+    if not client_redis: return {"is_enabled": False, "channels": []}
+    found = {key.decode().rsplit("_", 1)[0] for pattern in ("*_processing", "*_failed", "*_consumer") async for key in client_redis.scan_iter(match=pattern, count=500)}
+    names = sorted(set(channels) | found)
+    async with client_redis.pipeline(transaction=False) as pipe:
+        for name in names: pipe.llen(name).llen(f"{name}_processing").llen(f"{name}_failed").exists(f"{name}_consumer")
+        counts = await pipe.execute()
+    return {"is_enabled": True, "channels": [{"channel": name, "waiting": counts[i * 4], "running": counts[i * 4 + 1], "failed": counts[i * 4 + 2], "is_consumer": bool(counts[i * 4 + 3])} for i, name in enumerate(names)]}
 
 def func_monitor_background(*, app_state: State) -> dict:
-    """Work this worker does outside requests: periodic tasks, rows waiting in the write buffers, running background tasks, open websockets, error counters and failed queue jobs."""
-    task_names = {"runtime_task_postgres_buffer_flush": "Buffer flush", "runtime_task_inmemory_cache_cleanup": "In-memory cache cleanup", "runtime_task_otp_cleanup": "OTP cleanup", "runtime_task_log_api_cleanup": "log_api cleanup"}
+    """Work this worker does outside requests: periodic tasks, rows waiting in the write buffers, running background tasks, open websockets and error counters."""
+    task_names = {"runtime_task_postgres_buffer_flush": "Buffer flush", "runtime_task_inmemory_cache_cleanup": "In-memory cache cleanup", "runtime_task_otp_cleanup": "OTP cleanup", "runtime_task_log_api_cleanup": "log_api cleanup", "runtime_task_memory_history": "RAM history"}
     tasks = []
     for name, label in task_names.items():
         task = getattr(app_state, name, None)
@@ -110,7 +106,6 @@ def func_monitor_background(*, app_state: State) -> dict:
         "background_tasks_running": len(getattr(app_state, "runtime_background_tasks", set())),
         "websockets": sum(len(value) if isinstance(value, (dict, list, set)) else 1 for value in list(sockets.values())),
         "errors": [{"name": name, "count": count} for name, count in sorted(getattr(app_state, "runtime_error_count", {}).items())],
-        "failed_jobs": func_monitor_failed_jobs(),
     }
 
 def func_monitor_config_value(*, name: str, value) -> object:
@@ -121,19 +116,23 @@ def func_monitor_config_value(*, name: str, value) -> object:
     return value if value is None or isinstance(value, (bool, int, float)) else str(value)[:200]
 
 def func_monitor_app(*, app_state: State, app_routes: list, packages: tuple = ("fastapi", "starlette", "uvicorn", "asyncpg", "pydantic", "orjson", "redis", "psutil")) -> dict:
-    """What this server runs: Python and packages, mode flags, routes, which clients are connected, and every setting (secrets masked)."""
+    """What this server runs: Atom's version, Python and packages, mode flags, routes and func_* functions (split into Atom's and the project's), which clients are connected, and every setting (secrets masked)."""
     state = vars(app_state)["_state"]
     versions = []
     for name in packages:
         try: versions.append({"name": name, "version": metadata.version(name)})
         except metadata.PackageNotFoundError: continue
+    functions = [value for name, value in state.items() if name.startswith("func_") and callable(value)]
+    project_functions = sum(1 for value in functions if str(getattr(value, "__module__", "")).startswith("function_extend"))
+    project_routes = sum(1 for route in app_routes if str(getattr(getattr(route, "endpoint", None), "__module__", "")).startswith("router_extend"))
     clients = []
     for name, value in sorted(state.items()):
         if not name.startswith("client_"): continue
         is_on = bool(value) if isinstance(value, dict) else value is not None
         clients.append({"name": name, "is_on": is_on, "detail": ", ".join(sorted(value)) if isinstance(value, dict) else ""})
     return {
-        "server": {"python": platform.python_version(), "platform": platform.platform(terse=True), "pid": os.getpid(), "workers": state.get("config_uvicorn_workers", 1), "is_prod": state.get("config_is_prod"), "is_read_only": state.get("config_is_read_only"), "routes": len(app_routes), "apis_configured": len(state.get("config_api", {}))},
+        "server": {"python": platform.python_version(), "platform": platform.platform(terse=True), "pid": os.getpid(), "workers": state.get("config_uvicorn_workers", 1), "is_prod": state.get("config_is_prod"), "is_read_only": state.get("config_is_read_only"), "atom_version": state.get("cache_atom_version"),
+                   "routes": len(app_routes), "routes_project": project_routes, "apis_configured": len(state.get("config_api", {})), "functions": len(functions), "functions_project": project_functions},
         "packages": versions,
         "clients": clients,
         "config": [{"name": name, "value": func_monitor_config_value(name=name, value=state[name])} for name in sorted(state) if name.startswith("config_")],
@@ -145,6 +144,6 @@ async def func_monitor_report(*, app_state: State, view: str, hours: int = 24, c
     if view == "requests": return await func_monitor_requests(client_postgres=getattr(app_state, "client_postgres_log_api", None), hours=hours)
     if view == "errors": return await func_monitor_errors(client_postgres=getattr(app_state, "client_postgres_log_api", None), hours=hours)
     if view == "database": return await func_monitor_database(app_state=app_state, connection=connection)
-    if view == "background": return func_monitor_background(app_state=app_state)
+    if view == "background": return {**func_monitor_background(app_state=app_state), "queues": await func_monitor_queues(client_redis=app_state.client_redis_dict.get("queue"), channels=list(app_state.func_consumer_channels()))}
     if view == "app": return func_monitor_app(app_state=app_state, app_routes=app_routes or [])
     raise Exception(f"invalid view: {view}")

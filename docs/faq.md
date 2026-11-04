@@ -286,7 +286,7 @@ curl -X POST http://localhost:8000/my/ping \
   -H "Authorization: Bearer <access_token>"
 ```
 
-`GET /my/profile` also updates `last_active_at` by default, in the background on the master database, so apps that load the profile on open get it for free; set `config_is_profile_update_last_active_at = False` to turn that off.
+`GET /my/profile` also updates `last_active_at` by default, in the background on the master database, so apps that load the profile on open get it for free; set `config_is_profile_update_last_active_at = False` to turn that off. Both write at most once per 5 minutes per user (a call within 5 minutes of the stored time changes nothing), so `last_active_at` is accurate to 5 minutes; recording it never changes `updated_at`, which marks real edits only.
 
 Call it on a reasonable interval—such as every few minutes while the app is focused—instead of on every mouse movement or keystroke. Stop pinging when the user logs out or the app becomes inactive.
 
@@ -390,9 +390,9 @@ Define `func_extend` in `function_extend/`. Atom calls it once at startup, after
 <details>
 <summary><strong>Where do failed background jobs go?</strong></summary>
 
-A worker appends an unrecoverable job to `tmp/consumer_failed_payload.jsonl`. Each JSON Lines record contains the original payload and traceback, so one failed job does not make the whole file unreadable.
+A job that still fails after `config_queue_retry_max` retries is kept in `<channel>_failed` in its broker (a Redis list, a RabbitMQ queue, a Kafka topic or a Celery queue), with the payload, the attempt count and the error.
 
-Inspect the traceback, correct the underlying data or service problem, and replay only the jobs you have verified are safe. Be careful with non-idempotent operations: blindly replaying a partially completed create or external call can produce duplicates.
+Inspect the error, correct the underlying data or service problem, and replay only the jobs you have verified are safe. Be careful with non-idempotent operations: blindly replaying a partially completed create or external call can produce duplicates.
 
 The `tmp` directory is runtime storage and is recreated when Atom starts, so forward or archive failures elsewhere if you need durable production retention. See [queue.md](queue.md).
 
@@ -458,7 +458,7 @@ Create endpoints support two ways to move work off the request path:
 - Add `?is_background=true` for an in-process background task. This is simple and fast, but the task can be lost if the API process stops. Boolean query flags use `true`/`false`; legacy `1`/`0` values remain accepted for compatibility.
 - Add `?queue=redis` (or another configured queue mode) to publish the payload for a separate worker. This is the better choice for durable, scalable, or slow workloads.
 
-Make sure the selected queue client is configured and its consumer process is running before publishing jobs. Design handlers to be idempotent so retries cannot create duplicates, and monitor `tmp/consumer_failed_payload.jsonl` for terminal failures. See [Object Queues](queue.md) for object API details and [Background Workers](queue.md) for broader worker patterns.
+Make sure the selected queue client is configured and its consumer process is running before publishing jobs. Design handlers to be idempotent so retries cannot create duplicates, and watch `<channel>_failed` for jobs that failed for good. See [Object Queues](queue.md) for object API details and [Background Workers](queue.md) for broader worker patterns.
 
 </details>
 
@@ -548,6 +548,18 @@ config_cors_allow_origins=["https://app.example.com"]
 
 Booleans accept case-insensitive `true` and `false`; `1`/`0`, `yes`/`no`, and `on`/`off` are also accepted; structured values must use JSON with double-quoted strings. Never print secret values while debugging—confirm only whether they were loaded. See [config.md](config.md#how-config-is-loaded--overridden).
 
+</details>
+
+<details>
+<summary><strong>A user reports a failed request: how do I find it?</strong></summary>
+
+Every response carries an `x-request-id` header (a proxy's own `x-request-id` is kept when it is a plain 8-64 character token). The same id is in `log_api.request_id`, in the error line Atom prints (`400 Exception: invalid limit (request 3f2a9c1b7d4e6f80)`) and as the `request_id` tag in Sentry. A page can show it with its error message; then `SELECT * FROM log_api WHERE request_id = '<id>' AND created_at > now() - interval '1 day'` finds the row (the `created_at` index keeps it fast, so `request_id` needs no index of its own).
+</details>
+
+<details>
+<summary><strong>Which URL should a load balancer or App Service health check call?</strong></summary>
+
+`/health-ready`. It answers `200` only when every configured database (each Postgres, Redis, MSSQL and ClickHouse pool) responds to a trivial query within 2 seconds, checked at the same time, and `503 not ready: <kind>.<name> did not answer` otherwise, so traffic moves away from an instance that lost its database. It names pools only, never hosts or errors, keeps its answer for 5 seconds and is not written to `log_api`. `/health` answers `200` whenever the process runs: use it where only "is the app up" matters.
 </details>
 
 <details>

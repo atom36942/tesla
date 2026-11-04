@@ -1,12 +1,15 @@
 # import
 import ast
+import asyncio
 import functools
+import hashlib
 import importlib.util
 import inspect
 import os
 import pathlib
 import re
 import shutil
+import time
 import urllib.parse
 from decimal import Decimal
 from typing import Any
@@ -19,6 +22,8 @@ from fastapi.routing import APIRoute
 from fastapi.routing import iter_route_contexts
 from starlette.responses import Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from starlette.middleware.gzip import DEFAULT_EXCLUDED_CONTENT_TYPES
 from fastapi.staticfiles import StaticFiles
 from starlette.datastructures import State
 from starlette.routing import Match
@@ -296,13 +301,21 @@ def func_app_static_add(*, app: FastAPI, path: str = "/static", directories: tup
         pages[page["url"].lower()] = page["path"]
     static_files = StaticFiles(directory=directories[0], check_dir=False)
     static_files.all_directories = existing
-    async def static_no_cache(scope, receive, send):
-        # Revalidate every load (a 304 when unchanged), so a deploy never leaves a page running old and new files together.
+    async def static_cache(scope, receive, send):
+        # A link stamped ?v=<fingerprint> by func_app_page_response is kept a year, but only when that fingerprint is this server's copy of the file: during a rolling deploy an older
+        # instance may get the new page's link, and must not let the browser keep its old file under the new address. Anything else revalidates every load (a 304 when unchanged).
+        version = urllib.parse.parse_qs(scope.get("query_string", b"").decode("latin-1")).get("v", [None])[0]
+        cache_control = b"no-cache"
+        if version:
+            route_path = scope["path"][len(scope.get("root_path", "")):] if scope["path"].startswith(scope.get("root_path", "")) else scope["path"]
+            cache = getattr(scope["app"].state, "cache_static_version", None) if "app" in scope else None
+            fingerprint = await asyncio.to_thread(func_app_static_fingerprint, name=urllib.parse.unquote(route_path.lstrip("/")), cache_static_version=cache if cache is not None else {}, directories=existing)
+            if fingerprint == version: cache_control = b"public, max-age=31536000, immutable"
         async def send_with_header(message):
-            if message["type"] == "http.response.start": message["headers"] = [*message.get("headers", []), (b"cache-control", b"no-cache")]
+            if message["type"] == "http.response.start": message["headers"] = [*message.get("headers", []), (b"cache-control", cache_control)]
             await send(message)
         await static_files(scope, receive, send_with_header)
-    app.mount(path, static_no_cache, name="static")
+    app.mount(path, static_cache, name="static")
 
 def func_app_static_page_list(*, directories: tuple = ("static", "static_extend")) -> list:
     """Every page, home page included: each top-level <name>.html and <name>/index.html in static/ or static_extend/, whatever the name; other files are skipped. Each opens at /page/<name>.
@@ -323,10 +336,47 @@ def func_app_static_page_path(*, name: str, directories: tuple = ("static", "sta
     """The file GET /page/{name} serves: the listed page at /page/<name>, so /page and the home page share one rule; None for any other name. Only scanned files are served, so no name reaches outside the two folders."""
     return next((page["path"] for page in func_app_static_page_list(directories=directories) if page["url"] == f"/page/{urllib.parse.quote(name or '', safe='')}"), None)
 
+def func_app_static_fingerprint(*, name: str, cache_static_version: dict, directories: tuple = ("static", "static_extend")) -> str | None:
+    """Fingerprint of the file /static/<name> serves (first 10 hex of its MD5), or None when there is none; kept per file and redone only when its size or time changes."""
+    if ".." in name.split("/"): return None
+    file = next((os.path.join(d, name) for d in directories if os.path.isfile(os.path.join(d, name))), None)
+    if not file: return None
+    stat = os.stat(file)
+    key = (stat.st_mtime_ns, stat.st_size)
+    cached = cache_static_version.get(file)
+    if cached and cached[0] == key: return cached[1]
+    with open(file, "rb") as handle: digest = hashlib.md5(handle.read(), usedforsecurity=False).hexdigest()[:10]
+    cache_static_version[file] = (key, digest)
+    return digest
+
+def func_app_page_html(*, path: str, cache_static_version: dict, directories: tuple = ("static", "static_extend")) -> bytes:
+    """A page's HTML with every local link (src or href to /static/<file>) ending in ?v=<fingerprint of that file>, so the browser keeps the file until its content changes; links to missing files are left as they are."""
+    def stamp(match):
+        attribute, quote, name, query = match.group(1), match.group(2), match.group(3), match.group(4) or ""
+        digest = func_app_static_fingerprint(name=urllib.parse.unquote(name), cache_static_version=cache_static_version, directories=directories)
+        if not digest: return match.group(0)
+        params = [(k, v) for k, v in urllib.parse.parse_qsl(query.lstrip("?"), keep_blank_values=True) if k != "v"] + [("v", digest)]
+        return f"{attribute}={quote}/static/{name}?{urllib.parse.urlencode(params)}{quote}"
+    with open(path, encoding="utf-8") as handle: html = handle.read()
+    return re.sub(r"""\b(src|href)=(["'])/static/([^"'?#]+)(\?[^"'#]*)?\2""", stamp, html).encode("utf-8")
+
+async def func_app_page_response(*, request: Any, path: str, cache_static_version: dict) -> Response:
+    """Serve a page (GET / and /page/<name>) with its local links stamped by func_app_page_html; the page itself revalidates every load (ETag, 304 when unchanged), so a deploy shows at once."""
+    body = await asyncio.to_thread(func_app_page_html, path=path, cache_static_version=cache_static_version)
+    etag = f'"{hashlib.md5(body, usedforsecurity=False).hexdigest()}"'
+    headers = {"cache-control": "no-cache", "etag": etag}
+    if request.headers.get("if-none-match") == etag: return Response(status_code=304, headers=headers)
+    return Response(content=body, media_type="text/html", headers=headers)
+
 def func_app_cors_add(*, app: FastAPI, allow_origins: list = None, allow_origin_regex: str = None, allow_methods: list = None, allow_headers: list = None, expose_headers: list = None, allow_credentials: bool = True) -> None:
     """Configure CORS middleware on FastAPI application if origins are provided."""
     if not allow_origins and not allow_origin_regex: return
     app.add_middleware(CORSMiddleware, allow_origins=allow_origins or [], allow_origin_regex=allow_origin_regex, allow_methods=allow_methods or ["*"], allow_headers=allow_headers or ["*"], expose_headers=expose_headers or ["*"], allow_credentials=allow_credentials)
+
+def func_app_gzip_add(*, app: FastAPI, minimum_size: int = 1024, compresslevel: int = 1) -> None:
+    """Gzip responses over minimum_size when the client sends Accept-Encoding: gzip (browsers always do); responses already encoded (cache hits), event streams and files that are compressed already (Starlette's list: images, audio, video, zip, fonts; plus PDF and Office files) pass through. Level 1 keeps most of the size saving for a fraction of level 9's CPU."""
+    already_compressed = ("application/pdf", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", "application/vnd.openxmlformats-officedocument.wordprocessingml.document", "application/vnd.openxmlformats-officedocument.presentationml.presentation")
+    app.add_middleware(GZipMiddleware, minimum_size=minimum_size, compresslevel=compresslevel, exclude_content_types=(*DEFAULT_EXCLUDED_CONTENT_TYPES, *already_compressed))
 
 def func_app_fastapi_create(*, config_is_prod: bool = True, lifespan: Any = None, config_is_fastapi_telemetry: bool = False):
     """Create the FastAPI app; FastAPI's native OpenTelemetry stays off unless config_is_fastapi_telemetry, so requests skip its per-request provider lookup.
@@ -401,3 +451,20 @@ def func_app_route_lookup_add(*, app: FastAPI) -> int:
         await route.handle(scope, receive, send)
     router.middleware_stack = lookup_app
     return len(table)
+
+async def func_app_health_ready(*, app_state: Any, timeout_sec: float = 2) -> dict:
+    """Is every configured database reachable? Each pool answers a trivial query within timeout_sec, all at the same time. {"<kind>.<name>": {"is_ok", "ms"}}, names only: no host, URL or error text, since the route is public."""
+    async def postgres(pool): return await pool.fetchval("SELECT 1")
+    async def redis(client): return await client.ping()
+    async def mssql(pool):
+        async with pool.acquire() as conn, conn.cursor() as cursor: await cursor.execute("SELECT 1")
+    async def clickhouse(client): return await client.query("SELECT 1")
+    checks = {f"{kind}.{name}": (probe, client) for kind, probe, clients in (("postgres", postgres, app_state.client_postgres_dict), ("redis", redis, app_state.client_redis_dict), ("mssql", mssql, app_state.client_mssql_dict), ("clickhouse", clickhouse, app_state.client_clickhouse_dict)) for name, client in (clients or {}).items() if client}
+    async def timed(probe, client):
+        started = time.perf_counter()
+        try:
+            await asyncio.wait_for(probe(client), timeout=timeout_sec)
+            return {"is_ok": True, "ms": round((time.perf_counter() - started) * 1000)}
+        except Exception: return {"is_ok": False, "ms": round((time.perf_counter() - started) * 1000)}    # TimeoutError or a driver error: the reason stays out of a public answer
+    results = await asyncio.gather(*(timed(probe, client) for probe, client in checks.values()))
+    return dict(zip(checks, results, strict=True))

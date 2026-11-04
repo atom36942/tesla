@@ -117,6 +117,8 @@ Disabled (`None`) by default; activated automatically when connection credential
 | `config_sftp_port` | SFTP server port |
 | `config_sftp_username` | SFTP server username |
 | `config_sftp_password` | SFTP server password |
+| `config_sftp_known_hosts_path` | known_hosts file the server's key is checked against (default `~/.ssh/known_hosts`; add it with `ssh-keyscan -p <port> <host> >> <file>`) |
+| `config_sftp_is_host_verify` | Check the server's key (default true); false only for a server you trust on a network you trust |
 | `config_aws_access_key_id` | AWS Access Key ID |
 | `config_aws_secret_access_key` | AWS Secret Access Key |
 | `config_aws_s3_region_name` | AWS S3 region name |
@@ -144,12 +146,13 @@ Disabled (`None`) by default; activated automatically when connection credential
 | `config_is_home_atom_listed` | `true` (default): the home page lists Atom's pages and the project's; `false`: only the project's pages (`static_extend/`). Applied by the server in `GET /static-pages`; Atom's pages still open at `/page/<name>` |
 | `config_is_user_delete` | Enables user hard deletion through `/my/user-delete` and `/admin/user-delete` (default `False`); the database also needs `users` out of `config_postgres` control `table_row_delete_disable` |
 | `config_is_postgres_schema_init` | Boolean toggle for database schema initialization on startup |
+| `config_postgres_schema_lock_timeout_sec` | Longest wait for a table lock during schema init (default 10); past it startup stops and changes nothing. See what would change: `venv/bin/python -m script.schema_plan` |
 | `config_signup_allowed_roles` | Roles allowed for public signup, including new users created by OTP/Google login (default: `[]` disables signup; role `1` is always rejected). See [role settings](auth.md#signup-and-login-role-settings). |
 | `config_login_allowed_roles` | Allowed values for the supplied login `role` parameter (default: roles `1` through `20`; optional for password login) |
 | `config_is_otp_require_users_update` | `/admin/user-update` needs `otp` for `email`/`mobile` (default `False`); `/my/user-update` always does |
 | `config_is_read_only` | Boolean system-wide read-only mode toggle |
 | `config_is_tmp_reset` | Wipe `tmp/` at app start (default: `False`); features and scripts delete their own `tmp/<feature>/` files |
-| `config_is_profile_update_last_active_at` | `GET /my/profile` also sets the user's `last_active_at` in the background without delaying the response, always on the master database even when `?connection=` reads the profile from a replica (default: `True`; skipped when `config_is_read_only`) |
+| `config_is_profile_update_last_active_at` | `GET /my/profile` also sets the user's `last_active_at` in the background without delaying the response, always on the master database even when `?connection=` reads the profile from a replica (default: `True`; skipped when `config_is_read_only`); written at most once per 5 minutes per user, and never changes `updated_at` |
 | `config_is_pgweb_enabled` | Enable the PgWeb SQL console at `/pgweb` (default: `False`). Turn on only on a developer machine; even then it accepts only direct localhost requests from its own page |
 | `config_is_fastapi_telemetry` | FastAPI's built-in OpenTelemetry tracing, metrics, and logs (default `False`). Off, each request skips FastAPI's check for an OpenTelemetry backend (about 2 µs); turn on only when an OpenTelemetry provider is configured; exporters are then also set up from the `OTEL_*` environment variables. Errors still go to Sentry either way |
 | `config_is_uvicorn_access_log` | uvicorn's per-request console line (default `False`). Atom already records every request in `log_api`, and printing each line cost 12–31% throughput in a load test (see [performance.md](performance.md#8-uvicorn-access-log)). Set `True` to see requests in the console while debugging. Applies to `python main.py`; with `uvicorn main:app` pass `--no-access-log` yourself. |
@@ -167,6 +170,7 @@ Disabled (`None`) by default; activated automatically when connection credential
 | `config_postgres_pool_max_size` | Maximum connections per PostgreSQL pool (default: `20`) |
 | `config_mssql_pool_min_size` | Minimum connections per SQL Server pool (default: `1`) |
 | `config_mssql_pool_max_size` | Maximum connections per SQL Server pool (default: `10`) |
+| `config_postgres_pool_min_size_<name>`, `config_postgres_pool_max_size_<name>` | One database's pool size, e.g. `config_postgres_pool_max_size_test=3`; others keep the shared sizes. `config_mssql_pool_min_size_<name>`, `config_mssql_pool_max_size_<name>` do the same for SQL Server. An unknown `<name>` stops startup |
 | `config_mssql_pool_recycle_sec` | Reopen SQL Server connections older than this, in seconds (default: `1800`) |
 | `config_otp_length` | Digit length generated for OTP codes (default: `6`) |
 | `config_otp_expiry_sec` | Expiry window for OTP codes in seconds (default: `600`) |
@@ -176,6 +180,8 @@ Disabled (`None`) by default; activated automatically when connection credential
 | `config_access_token_expires_sec` | JWT Access Token lifetime in seconds |
 | `config_refresh_token_expires_sec` | JWT Refresh Token lifetime in seconds |
 | `config_token_cache_max` | Verified tokens cached per worker (`10000`, about 1 KB each); `0` turns the cache off. A token is fully verified on first use, then reused until its own `exp`; the key is the whole signed token, so an edited token is verified again. Expired entries are swept every `config_inmemory_cache_cleanup_auto_sec`; when full, the oldest entry is dropped |
+| `config_request_body_max_kb` | Largest request body in KB, except multipart uploads (`10240`, 10 MB); a bigger one gets `413` before it is read, since a JSON body is held in memory and parsing takes several times its size |
+| `config_request_form_max_kb` | Largest multipart upload (`multipart/form-data`) in KB, all files and fields together (`102400`, 100 MB; files go to disk past 1 MB); a bigger one gets `413` |
 | `config_blob_limit_size_kb` | Maximum file upload size in KB (default: `500`) |
 | `config_blob_limit_upload` | Maximum files allowed per upload request (default: `100`) |
 | `config_blob_expire_sec_upload` | Presigned upload URL lifetime in seconds (`3600`) |
@@ -183,6 +189,7 @@ Disabled (`None`) by default; activated automatically when connection credential
 | `config_buffer_limit_default` | In-memory buffer size before flushing rows to Postgres (`100`) |
 | `config_buffer_rows_max` | Max rows pending in each in-memory buffer during an outage (`100000`, at least `1000`). When full, `mode=buffer` creates return `503 buffer full, retry later` and API-log rows drop the oldest (counted as `buffer_dropped` on the Monitor page's Background tab) |
 | `config_postgres_buffer_flush_auto_sec` | Timer interval in seconds to auto-flush write buffers (`60`) |
+| `config_api_cache_inmemory_max_kb` | Largest total size, in KB, of the `inmemory` API response cache per worker, counting the stored (gzipped) bodies (`102400`, 100 MB); over it, the oldest entries are dropped and read from the route again on their next request |
 | `config_inmemory_cache_cleanup_auto_sec` | Timer interval in seconds to purge expired cache entries (`300`) |
 | `config_batch_item_limit` | Maximum objects allowed per batch CRUD request (`1000`) |
 | `config_sql_read_limit_default` | Default page size for object read queries (`100`) |
@@ -236,6 +243,8 @@ Disabled (`None`) by default; activated automatically when connection credential
 | Key | Usage |
 |---|---|
 | `config_queue_services` | Registered background queue providers (`redis`, `rabbitmq`, `kafka`, `celery`) |
+| `config_queue_concurrency` | Jobs a consumer runs at once (default 10) |
+| `config_queue_retry_max` | Retries of a failed job before it is kept in `<channel>_failed` (default 3) |
 | `config_blob_services` | Registered blob storage providers (`s3`, `azure`) |
 | `config_email_services` | Registered email providers (`ses`, `resend`, `azure`) |
 | `config_mobile_services` | Registered SMS providers (`sns`, `fast2sms`, `azure`) |
@@ -273,6 +282,8 @@ Per-endpoint security and execution policy table.
 | `token` | JWT Payload | Fastest (zero DB lookup); best for stable claims |
 | `inmemory` | Redis / Memory Cache | High speed; subject to `config_redis_cache_ttl_sec` TTL |
 | `realtime` | Live PostgreSQL Query | Guaranteed freshness; best for critical admin/delete ops |
+
+The role, deactivated and deleted checks share one `users` query per request (`func_middleware_user_row_reader`): a route with all three in `realtime` mode makes one database round trip, not three.
 
 ---
 

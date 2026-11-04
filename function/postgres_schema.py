@@ -1,5 +1,7 @@
 # import
+import contextlib
 import hashlib
+import re
 from typing import Any
 import asyncpg
 from starlette.datastructures import State
@@ -122,29 +124,33 @@ def func_postgres_schema_sql_queries(sql_config: Any):
 
 async def func_postgres_schema_extensions_init(*, conn: asyncpg.Connection, extensions: list) -> None:
     """Install configured PostgreSQL extensions when privileges permit."""
+    installed = {r[0] for r in await conn.fetch("SELECT extname FROM pg_extension WHERE extname = ANY($1::text[])", list(extensions))} if extensions else set()
     for extension in extensions:
         try:
-            is_extension_exists = await conn.fetchval("SELECT EXISTS (SELECT 1 FROM pg_extension WHERE extname = $1)", extension)
-            if not is_extension_exists: await conn.execute(f'CREATE EXTENSION "{extension}";')
+            if extension not in installed: await conn.execute(f'CREATE EXTENSION "{extension}";')
         except Exception as e:
             if any(x in str(e).lower() for x in ("insufficient_privilege", "permission denied", "must be superuser")) or "pg_cron" in extension: print(f"⚠️  {f'extension {extension}':<30} : ❌ skipped (insufficient privileges)")
             else: raise e
     return
 
 async def func_postgres_schema_tables_sync(*, conn: asyncpg.Connection, tables: dict, catalog: dict) -> None:
-    """Synchronize configured tables, columns, indexes, and constraints."""
-    for table_name, column_configs in tables.items():
-        primary_cfg = column_configs[0]
+    """Synchronize configured tables, columns, indexes, and constraints: the current state is read once for all tables, then only what differs is changed."""
+    names = list(tables)
+    existing_tables = {r[0] for r in await conn.fetch("SELECT c.relname FROM pg_class c JOIN pg_namespace n ON c.relnamespace = n.oid WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relname = ANY($1::text[])", names)}
+    for table_name in names:
+        if table_name in existing_tables: continue
+        primary_cfg = tables[table_name][0]
         identity_clause = f" GENERATED {primary_cfg['identity'].upper().replace('_', ' ')} AS IDENTITY" if primary_cfg.get("identity") else ""
         await conn.execute(f'CREATE TABLE IF NOT EXISTS "{table_name}" ("{primary_cfg["name"]}" {primary_cfg["datatype"]}{identity_clause} PRIMARY KEY);')
-        rows = await conn.fetch("SELECT a.attname, format_type(a.atttypid, a.atttypmod) as type, a.attnotnull as notnull, pg_get_expr(ad.adbin, ad.adrelid) as default FROM pg_attribute a JOIN pg_class t ON a.attrelid = t.oid JOIN pg_namespace n ON t.relnamespace = n.oid LEFT JOIN pg_attrdef ad ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum WHERE t.relname = $1 AND n.nspname = 'public' AND a.attnum > 0 AND NOT a.attisdropped", table_name)
+    column_rows = await conn.fetch("SELECT t.relname, a.attname, format_type(a.atttypid, a.atttypmod) as type, a.attnotnull as notnull, pg_get_expr(ad.adbin, ad.adrelid) as default FROM pg_attribute a JOIN pg_class t ON a.attrelid = t.oid JOIN pg_namespace n ON t.relnamespace = n.oid LEFT JOIN pg_attrdef ad ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum WHERE t.relname = ANY($1::text[]) AND n.nspname = 'public' AND a.attnum > 0 AND NOT a.attisdropped", names)
+    meta_rows = await conn.fetch("SELECT tablename, indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename = ANY($1::text[]) UNION ALL SELECT t.relname, con.conname FROM pg_constraint con JOIN pg_class t ON con.conrelid = t.oid JOIN pg_namespace n ON t.relnamespace = n.oid WHERE n.nspname = 'public' AND t.relname = ANY($1::text[])", names)
+    for table_name, column_configs in tables.items():
+        rows = [r[1:] for r in column_rows if r[0] == table_name]
         current_cols = {r[0]: r[1] for r in rows}
         current_notnulls = {r[0]: r[2] for r in rows}
         current_defaults = {r[0]: r[3] for r in rows}
-        meta_rows = await conn.fetch("SELECT indexname as name FROM pg_indexes WHERE tablename=$1 UNION ALL SELECT conname as name FROM pg_constraint WHERE conrelid=$1::regclass", table_name)
-        existing_meta = {r[0] for r in meta_rows}
+        existing_meta = {r[1] for r in meta_rows if r[0] == table_name}
         table_changed = False
-        await conn.execute(f"DO $$ DECLARE r RECORD; BEGIN FOR r IN SELECT tgname FROM pg_trigger JOIN pg_class ON pg_trigger.tgrelid = pg_class.oid WHERE relname = '{table_name}' AND tgname LIKE 'trigger_%%' LOOP EXECUTE format('DROP TRIGGER IF EXISTS %I ON %I', r.tgname, '{table_name}'); END LOOP; END $$;")  # noqa: S608 - table names come from config_postgres, not requests
         renamed_cols = {}
         for col_cfg in column_configs:
             if col_cfg.get("is_primary") is True:
@@ -278,6 +284,18 @@ async def func_postgres_schema_tables_read(*, conn: asyncpg.Connection) -> dict:
         db_tables.setdefault(row[0], []).append(row[1])
     return db_tables
 
+async def func_postgres_schema_triggers_read(*, conn: asyncpg.Connection) -> dict:
+    """Read every trigger on public tables with its definition, keyed by (table, trigger name)."""
+    rows = await conn.fetch("SELECT c.relname, t.tgname, pg_get_triggerdef(t.oid) FROM pg_trigger t JOIN pg_class c ON t.tgrelid = c.oid JOIN pg_namespace n ON c.relnamespace = n.oid WHERE n.nspname = 'public' AND NOT t.tgisinternal")
+    return {(r[0], r[1]): r[2] for r in rows}
+
+async def func_postgres_schema_trigger_set(*, conn: asyncpg.Connection, existing: dict, table: str, name: str, definition: str) -> None:
+    """Create a trigger unless the same definition is already there; inside schema init's transaction the drop and create are atomic, so a guard never disappears for other sessions."""
+    def normalize(sql): return " ".join(str(sql).lower().replace("public.", "").replace('"', "").replace("'", "").rstrip(";").split())
+    if normalize(existing.get((table, name), "")) == normalize(f"CREATE TRIGGER {name} {definition}"): return
+    await conn.execute(f"DROP TRIGGER IF EXISTS {name} ON {table}; CREATE TRIGGER {name} {definition};")
+    existing[(table, name)] = f"CREATE TRIGGER {name} {definition}"
+
 async def func_postgres_schema_users_init(*, conn: asyncpg.Connection, db_tables: dict, catalog: dict, context: dict, root_user_password_hash: str = None) -> None:
     """Initialize root-user protection, root credentials, and user audit triggers."""
     is_root_user_delete_disabled = context["is_root_user_delete_disabled"]
@@ -285,23 +303,26 @@ async def func_postgres_schema_users_init(*, conn: asyncpg.Connection, db_tables
     is_log_users_password = context["is_log_users_password"]
     is_log_users_delete = context["is_log_users_delete"]
     users_cols = db_tables.get("users", [])
+    existing = context["triggers"] if "triggers" in context else await func_postgres_schema_triggers_read(conn=conn)
     if users_cols:
+        is_log_password = is_log_users_password and "password" in users_cols and "log_users_password" in db_tables
+        is_log_delete = is_log_users_delete and "deleted_at" in users_cols and "log_users_delete" in db_tables
+        functions = [sql for sql, is_on in (("CREATE OR REPLACE FUNCTION func_protect_root_users() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF TG_OP = 'DELETE' THEN IF OLD.id = 1 THEN RAISE EXCEPTION 'DELETE not allowed for root user (id=1)'; END IF; RETURN OLD; END IF; RETURN NULL; END; $$;", is_root_user_delete_disabled), ('CREATE OR REPLACE FUNCTION func_password_log_users() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF OLD.password IS DISTINCT FROM NEW.password THEN INSERT INTO log_users_password (user_id, password, created_by_id) VALUES (NEW.id, NEW.password, NEW.updated_by_id); END IF; RETURN NEW; END; $$;', is_log_password), ("CREATE OR REPLACE FUNCTION func_log_users_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF TG_OP = 'UPDATE' THEN IF OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL THEN INSERT INTO log_users_delete (user_id, type, created_by_id) VALUES (NEW.id, 1, COALESCE(NEW.deleted_by_id, NEW.updated_by_id)); ELSIF OLD.deleted_at IS NOT NULL AND NEW.deleted_at IS NULL THEN INSERT INTO log_users_delete (user_id, type, created_by_id) VALUES (NEW.id, 2, NEW.updated_by_id); END IF; RETURN NEW; ELSIF TG_OP = 'DELETE' THEN INSERT INTO log_users_delete (user_id, type) VALUES (OLD.id, 3); RETURN OLD; END IF; RETURN NULL; END; $$;", is_log_delete)) if is_on]
+        if functions: await conn.execute(" ".join(functions))    # one round trip for the trigger functions
         if is_root_user_delete_disabled:
             catalog["tg"].add("trigger_protect_root_users")
-            await conn.execute("CREATE OR REPLACE FUNCTION func_protect_root_users() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF TG_OP = 'DELETE' THEN IF OLD.id = 1 THEN RAISE EXCEPTION 'DELETE not allowed for root user (id=1)'; END IF; RETURN OLD; END IF; RETURN NULL; END; $$; DROP TRIGGER IF EXISTS trigger_protect_root_users ON users; CREATE TRIGGER trigger_protect_root_users BEFORE DELETE ON users FOR EACH ROW EXECUTE FUNCTION func_protect_root_users();")
+            await func_postgres_schema_trigger_set(conn=conn, existing=existing, table="users", name="trigger_protect_root_users", definition="BEFORE DELETE ON users FOR EACH ROW EXECUTE FUNCTION func_protect_root_users()")
         if is_root_user_create and all(c in users_cols for c in ("username", "password", "role", "deleted_at", "deactivated_at")):
             if not root_user_password_hash:
                 raise Exception("config_root_user_password must be set in env when is_root_user_create is enabled")
             await conn.execute("INSERT INTO users (username, password, role) VALUES ('admin', $1, 1) ON CONFLICT (username, role) DO UPDATE SET username = 'admin', password = EXCLUDED.password, role = 1, deleted_at = NULL, deactivated_at = NULL;", root_user_password_hash)
             await conn.execute("UPDATE users SET username = 'admin', password = $1, role = 1, deleted_at = NULL, deactivated_at = NULL WHERE id = 1;", root_user_password_hash)
-        if is_log_users_password and "password" in users_cols and "log_users_password" in db_tables:
+        if is_log_password:
             catalog["tg"].add("trigger_password_log_users")
-            await conn.execute("CREATE OR REPLACE FUNCTION func_password_log_users() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF OLD.password IS DISTINCT FROM NEW.password THEN INSERT INTO log_users_password (user_id, password, created_by_id) VALUES (NEW.id, NEW.password, NEW.updated_by_id); END IF; RETURN NEW; END; $$;")
-            await conn.execute("DROP TRIGGER IF EXISTS trigger_password_log_users ON users; CREATE TRIGGER trigger_password_log_users AFTER UPDATE ON users FOR EACH ROW EXECUTE FUNCTION func_password_log_users();")
-        if is_log_users_delete and "deleted_at" in users_cols and "log_users_delete" in db_tables:
+            await func_postgres_schema_trigger_set(conn=conn, existing=existing, table="users", name="trigger_password_log_users", definition="AFTER UPDATE ON users FOR EACH ROW EXECUTE FUNCTION func_password_log_users()")
+        if is_log_delete:
             catalog["tg"].add("trigger_log_users_delete")
-            await conn.execute("CREATE OR REPLACE FUNCTION func_log_users_delete() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF TG_OP = 'UPDATE' THEN IF OLD.deleted_at IS NULL AND NEW.deleted_at IS NOT NULL THEN INSERT INTO log_users_delete (user_id, type, created_by_id) VALUES (NEW.id, 1, COALESCE(NEW.deleted_by_id, NEW.updated_by_id)); ELSIF OLD.deleted_at IS NOT NULL AND NEW.deleted_at IS NULL THEN INSERT INTO log_users_delete (user_id, type, created_by_id) VALUES (NEW.id, 2, NEW.updated_by_id); END IF; RETURN NEW; ELSIF TG_OP = 'DELETE' THEN INSERT INTO log_users_delete (user_id, type) VALUES (OLD.id, 3); RETURN OLD; END IF; RETURN NULL; END; $$;")
-            await conn.execute("DROP TRIGGER IF EXISTS trigger_log_users_delete ON users; CREATE TRIGGER trigger_log_users_delete AFTER UPDATE OF deleted_at OR DELETE ON users FOR EACH ROW EXECUTE FUNCTION func_log_users_delete();")
+            await func_postgres_schema_trigger_set(conn=conn, existing=existing, table="users", name="trigger_log_users_delete", definition="AFTER DELETE OR UPDATE OF deleted_at ON users FOR EACH ROW EXECUTE FUNCTION func_log_users_delete()")
     return
 
 async def func_postgres_schema_triggers_sync(*, conn: asyncpg.Connection, db_tables: dict, catalog: dict, context: dict) -> None:
@@ -311,27 +332,23 @@ async def func_postgres_schema_triggers_sync(*, conn: asyncpg.Connection, db_tab
     is_updated_at_set = context["is_updated_at_set"]
     bulk_blocked = context["bulk_blocked"]
     table_blocked = context["table_blocked"]
-    await conn.execute("CREATE OR REPLACE FUNCTION func_delete_disable_is_protected() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF OLD.is_protected IS TRUE THEN RAISE EXCEPTION 'DELETE not allowed for protected row in %', TG_TABLE_NAME; END IF; RETURN OLD; END; $$;")
-    await conn.execute("CREATE OR REPLACE FUNCTION func_set_updated_at() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.updated_at=NOW(); RETURN NEW; END; $$;")
-    await conn.execute("CREATE OR REPLACE FUNCTION func_delete_disable_bulk() RETURNS trigger LANGUAGE plpgsql AS $$ DECLARE n BIGINT := TG_ARGV[0]; BEGIN IF (SELECT COUNT(*) FROM deleted_rows) > n THEN RAISE EXCEPTION 'cant delete more than % rows',n; END IF; RETURN OLD; END; $$;")
-    await conn.execute("CREATE OR REPLACE FUNCTION func_delete_disable_table() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'operation not allowed on %', TG_TABLE_NAME; END; $$;")
+    existing = context["triggers"] if "triggers" in context else await func_postgres_schema_triggers_read(conn=conn)
+    await conn.execute("CREATE OR REPLACE FUNCTION func_delete_disable_is_protected() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF OLD.is_protected IS TRUE THEN RAISE EXCEPTION 'DELETE not allowed for protected row in %', TG_TABLE_NAME; END IF; RETURN OLD; END; $$; CREATE OR REPLACE FUNCTION func_set_updated_at() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN NEW.updated_at=NOW(); RETURN NEW; END; $$; CREATE OR REPLACE FUNCTION func_set_updated_at_except_activity() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF to_jsonb(NEW) - 'updated_at' - 'last_active_at' IS DISTINCT FROM to_jsonb(OLD) - 'updated_at' - 'last_active_at' THEN NEW.updated_at=NOW(); END IF; RETURN NEW; END; $$; CREATE OR REPLACE FUNCTION func_delete_disable_bulk() RETURNS trigger LANGUAGE plpgsql AS $$ DECLARE n BIGINT := TG_ARGV[0]; BEGIN IF (SELECT COUNT(*) FROM deleted_rows) > n THEN RAISE EXCEPTION 'cant delete more than % rows',n; END IF; RETURN OLD; END; $$; CREATE OR REPLACE FUNCTION func_delete_disable_table() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'operation not allowed on %', TG_TABLE_NAME; END; $$;")
     for table, cols in db_tables.items():
         if table == "spatial_ref_sys":
             continue
         if not is_truncate_table:
             trunc_tg_name = f"trigger_truncate_disable_{table}"
             catalog["tg"].add(trunc_tg_name)
-            await conn.execute(f"DROP TRIGGER IF EXISTS {trunc_tg_name} ON {table}; CREATE TRIGGER {trunc_tg_name} BEFORE TRUNCATE ON {table} FOR EACH STATEMENT EXECUTE FUNCTION func_delete_disable_table();")
+            await func_postgres_schema_trigger_set(conn=conn, existing=existing, table=table, name=trunc_tg_name, definition=f"BEFORE TRUNCATE ON {table} FOR EACH STATEMENT EXECUTE FUNCTION func_delete_disable_table()")
         if is_protected_delete_disabled and "is_protected" in cols:
             prot_tg_name = f"trigger_delete_disable_is_protected_{table}"
             catalog["tg"].add(prot_tg_name)
-            await conn.execute(f"DROP TRIGGER IF EXISTS {prot_tg_name} ON {table}")
-            await conn.execute(f"CREATE TRIGGER {prot_tg_name} BEFORE DELETE ON {table} FOR EACH ROW EXECUTE FUNCTION func_delete_disable_is_protected();")
+            await func_postgres_schema_trigger_set(conn=conn, existing=existing, table=table, name=prot_tg_name, definition=f"BEFORE DELETE ON {table} FOR EACH ROW EXECUTE FUNCTION func_delete_disable_is_protected()")
         if is_updated_at_set and "updated_at" in cols:
             upd_tg_name = f"trigger_updated_at_set_{table}"
             catalog["tg"].add(upd_tg_name)
-            await conn.execute(f"DROP TRIGGER IF EXISTS {upd_tg_name} ON {table}")
-            await conn.execute(f"CREATE TRIGGER {upd_tg_name} BEFORE UPDATE ON {table} FOR EACH ROW EXECUTE FUNCTION func_set_updated_at();")
+            await func_postgres_schema_trigger_set(conn=conn, existing=existing, table=table, name=upd_tg_name, definition=f"BEFORE UPDATE ON {table} FOR EACH ROW EXECUTE FUNCTION {'func_set_updated_at_except_activity' if 'last_active_at' in cols else 'func_set_updated_at'}()")    # recording activity (last_active_at) is not an edit
     if table_blocked == ["*"]:
         table_blocked = [t for t in db_tables if t != "spatial_ref_sys"]
     if bulk_blocked and bulk_blocked[0][0] == "*":
@@ -341,20 +358,19 @@ async def func_postgres_schema_triggers_sync(*, conn: asyncpg.Connection, db_tab
         if table in db_tables:
             bulk_tg_name = f"trigger_delete_disable_bulk_{table}"
             catalog["tg"].add(bulk_tg_name)
-            await conn.execute(f"DROP TRIGGER IF EXISTS {bulk_tg_name} ON {table}")
-            await conn.execute(f"CREATE TRIGGER {bulk_tg_name} AFTER DELETE ON {table} REFERENCING OLD TABLE AS deleted_rows FOR EACH STATEMENT EXECUTE FUNCTION func_delete_disable_bulk({limit});")
+            await func_postgres_schema_trigger_set(conn=conn, existing=existing, table=table, name=bulk_tg_name, definition=f"AFTER DELETE ON {table} REFERENCING OLD TABLE AS deleted_rows FOR EACH STATEMENT EXECUTE FUNCTION func_delete_disable_bulk('{limit}')")
     for table in table_blocked:
         if table in db_tables:
             tab_tg_name = f"trigger_delete_disable_{table}"
             catalog["tg"].add(tab_tg_name)
-            await conn.execute(f"DROP TRIGGER IF EXISTS {tab_tg_name} ON {table}")
-            await conn.execute(f"CREATE TRIGGER {tab_tg_name} BEFORE DELETE ON {table} FOR EACH ROW EXECUTE FUNCTION func_delete_disable_table();")
+            await func_postgres_schema_trigger_set(conn=conn, existing=existing, table=table, name=tab_tg_name, definition=f"BEFORE DELETE ON {table} FOR EACH ROW EXECUTE FUNCTION func_delete_disable_table()")
     return
 
 async def func_postgres_schema_cleanup(*, conn: asyncpg.Connection, tables: dict, catalog: dict) -> None:
     """Remove obsolete generated triggers, constraints, and indexes from managed tables."""
     managed_tables = list(tables.keys())
     managed_tables_str = ",".join(f"'{t}'" for t in managed_tables) if managed_tables else "''"
+    blocks = []    # one statement for all three, a single round trip
     for prefix in ("tg", "uni_chk", "idx"):
         wants = catalog["tg"] if prefix == "tg" else catalog["uni"] | catalog["chk"] if prefix == "uni_chk" else catalog["idx"] | catalog["uni"] | catalog["chk"]
         wants_str = ",".join(f"'{i}'" for i in wants) if wants else "''"
@@ -379,7 +395,8 @@ async def func_postgres_schema_cleanup(*, conn: asyncpg.Connection, tables: dict
             drop_fmt = "ALTER TABLE %I DROP CONSTRAINT IF EXISTS %I"
             drop_vars = "record.relname, record.conname"
             like_filter = f"(conname LIKE 'unique_%%' OR conname LIKE 'check_%%') AND relname IN ({managed_tables_str})"
-        await conn.execute(f"""DO $$ DECLARE record RECORD; BEGIN FOR record IN SELECT {selection} FROM {info_tbl} {join_clause} WHERE {like_filter} LOOP IF NOT record.{selection.split(",")[0]} IN ({wants_str}) THEN EXECUTE format('{drop_fmt}', {drop_vars}); END IF; END LOOP; END $$;""")  # noqa: S608 - table names come from config_postgres, not requests
+        blocks.append(f"""DO $$ DECLARE record RECORD; BEGIN FOR record IN SELECT {selection} FROM {info_tbl} {join_clause} WHERE {like_filter} LOOP IF NOT record.{selection.split(",")[0]} IN ({wants_str}) THEN EXECUTE format('{drop_fmt}', {drop_vars}); END IF; END LOOP; END $$;""")  # noqa: S608 - table names come from config_postgres, not requests
+    await conn.execute(" ".join(blocks))
     return
 
 async def func_postgres_schema_sql_execute(*, conn: asyncpg.Connection, sql_config: Any) -> None:
@@ -387,25 +404,74 @@ async def func_postgres_schema_sql_execute(*, conn: asyncpg.Connection, sql_conf
     for query in func_postgres_schema_sql_queries(sql_config): await conn.execute(query)
     return
 
-async def func_postgres_schema_tables_init(*, app_state: State, client_postgres: asyncpg.Pool, tables: dict) -> str:
+async def func_postgres_schema_lock_timeout(*, conn: Any, lock_timeout_sec: int) -> Any:
+    """Inside the schema transaction: wait at most lock_timeout_sec for each table lock, so a busy table makes startup fail with a clear message instead of hanging the deploy."""
+    if lock_timeout_sec: await conn.execute(f"SET LOCAL lock_timeout = '{int(lock_timeout_sec)}s'")
+    return
+
+def func_postgres_schema_lock_error(*, error: Exception, lock_timeout_sec: int) -> Exception:
+    return Exception(f"schema init: a table stayed locked by other sessions for over {lock_timeout_sec} s (config_postgres_schema_lock_timeout_sec), so nothing was changed; start again when it is quiet. See what would change: venv/bin/python -m script.schema_plan ({error})")
+
+async def func_postgres_schema_tables_init(*, app_state: State, client_postgres: asyncpg.Pool, tables: dict, lock_timeout_sec: int = 10) -> str:
     """Create or update only the given tables (columns, indexes, constraints); no extensions, users or triggers, so other tables in that database are untouched."""
     config_postgres = {"table": tables}
     app_state.func_postgres_schema_config_validate(config_postgres=config_postgres)
     context = app_state.func_postgres_schema_context_build(config_postgres=config_postgres)
-    async with client_postgres.acquire() as conn:
-        await app_state.func_postgres_schema_tables_sync(conn=conn, tables=tables, catalog=context["catalog"])
+    try:
+        async with client_postgres.acquire() as conn, conn.transaction():
+            await func_postgres_schema_lock_timeout(conn=conn, lock_timeout_sec=lock_timeout_sec)
+            await app_state.func_postgres_schema_tables_sync(conn=conn, tables=tables, catalog=context["catalog"])
+    except asyncpg.exceptions.LockNotAvailableError as e: raise func_postgres_schema_lock_error(error=e, lock_timeout_sec=lock_timeout_sec) from None
     return "tables init done"
 
-async def func_postgres_schema_init(*, app_state: State, client_postgres: asyncpg.Pool | None, config_postgres: dict, root_user_password_hash: str = None) -> str:
-    """Initialize PostgreSQL schema by composing focused helpers registered on app.state."""
-    app_state.func_postgres_schema_config_validate(config_postgres=config_postgres)
-    context = app_state.func_postgres_schema_context_build(config_postgres=config_postgres)
-    async with client_postgres.acquire() as conn:
-        await app_state.func_postgres_schema_extensions_init(conn=conn, extensions=config_postgres.get("extension") or [])
+async def func_postgres_schema_steps(*, app_state: State, conn: Any, config_postgres: dict, context: dict, root_user_password_hash: str = None, lock_timeout_sec: int = 10) -> None:
+    """The schema steps, in order, on one connection: startup runs them for real, func_postgres_schema_plan only records their statements."""
+    # extensions outside the transaction: a missing privilege is skipped, which must not abort the rest
+    await app_state.func_postgres_schema_extensions_init(conn=conn, extensions=config_postgres.get("extension") or [])
+    # one transaction: other sessions see the old schema or the new one, never a table without its triggers
+    async with conn.transaction():
+        await func_postgres_schema_lock_timeout(conn=conn, lock_timeout_sec=lock_timeout_sec)
         await app_state.func_postgres_schema_tables_sync(conn=conn, tables=config_postgres["table"], catalog=context["catalog"])
         db_tables = await app_state.func_postgres_schema_tables_read(conn=conn)
+        context["triggers"] = await app_state.func_postgres_schema_triggers_read(conn=conn)
         await app_state.func_postgres_schema_users_init(conn=conn, db_tables=db_tables, catalog=context["catalog"], context=context, root_user_password_hash=root_user_password_hash)
         await app_state.func_postgres_schema_triggers_sync(conn=conn, db_tables=db_tables, catalog=context["catalog"], context=context)
         await app_state.func_postgres_schema_cleanup(conn=conn, tables=config_postgres["table"], catalog=context["catalog"])
-        await app_state.func_postgres_schema_sql_execute(conn=conn, sql_config=config_postgres.get("sql", {}))
+    # custom SQL last and outside the transaction, as before (it may hold statements such as CREATE INDEX CONCURRENTLY)
+    await app_state.func_postgres_schema_sql_execute(conn=conn, sql_config=config_postgres.get("sql", {}))
+    return
+
+async def func_postgres_schema_init(*, app_state: State, client_postgres: asyncpg.Pool | None, config_postgres: dict, root_user_password_hash: str = None, lock_timeout_sec: int = 10) -> str:
+    """Initialize PostgreSQL schema by composing focused helpers registered on app.state."""
+    app_state.func_postgres_schema_config_validate(config_postgres=config_postgres)
+    context = app_state.func_postgres_schema_context_build(config_postgres=config_postgres)
+    try:
+        async with client_postgres.acquire() as conn: await func_postgres_schema_steps(app_state=app_state, conn=conn, config_postgres=config_postgres, context=context, root_user_password_hash=root_user_password_hash, lock_timeout_sec=lock_timeout_sec)
+    except asyncpg.exceptions.LockNotAvailableError as e: raise func_postgres_schema_lock_error(error=e, lock_timeout_sec=lock_timeout_sec) from None
     return "database init done"
+
+SCHEMA_RISKS = ((r"ALTER COLUMN .* TYPE ", "rewrites the table, which stays locked until it finishes"), (r"SET NOT NULL", "reads every row while the table is locked"),
+                (r"^\s*CREATE (UNIQUE )?INDEX (?!CONCURRENTLY)", "blocks writes to the table while the index builds"), (r"\bDROP (TABLE|COLUMN)\b", "removes data"))
+SCHEMA_ROUTINE = (r"^\s*CREATE OR REPLACE FUNCTION", r"^\s*DO \$\$", r"^\s*INSERT INTO users \(username, password, role\)", r"^\s*UPDATE users SET username = 'admin'")    # run on every start, whether anything changed or not
+
+async def func_postgres_schema_plan(*, app_state: State, client_postgres: asyncpg.Pool, config_postgres: dict) -> list:
+    """The statements startup would run to match config_postgres, without running them: [{"sql", "risk", "table", "rows", "is_routine"}] (is_routine: runs on every start, whether anything changed or not). Catalog reads go to the database; every statement that would change it is recorded instead. Steps after a new table read the database as it is now, so a plan for a fresh database is incomplete."""
+    class Recorder:
+        def __init__(self, conn): self.conn, self.statements = conn, []
+        async def fetch(self, *args, **kwargs): return await self.conn.fetch(*args, **kwargs)
+        async def fetchrow(self, *args, **kwargs): return await self.conn.fetchrow(*args, **kwargs)
+        async def fetchval(self, *args, **kwargs): return await self.conn.fetchval(*args, **kwargs)
+        async def execute(self, sql, *args, **kwargs): self.statements.append(sql)
+        def transaction(self): return contextlib.nullcontext()
+    app_state.func_postgres_schema_config_validate(config_postgres=config_postgres)
+    context = app_state.func_postgres_schema_context_build(config_postgres=config_postgres)
+    async with client_postgres.acquire() as conn:
+        recorder = Recorder(conn)
+        await func_postgres_schema_steps(app_state=app_state, conn=recorder, config_postgres=config_postgres, context=context, root_user_password_hash="(plan)", lock_timeout_sec=0)    # noqa: S106 - a placeholder: the hash is a bound value, never part of the recorded SQL
+        rows = {r["relname"]: int(r["reltuples"]) for r in await conn.fetch("SELECT c.relname, c.reltuples FROM pg_class c JOIN pg_namespace n ON c.relnamespace = n.oid WHERE n.nspname = 'public' AND c.relkind = 'r'")}
+    plan = []
+    for sql in recorder.statements:
+        risk = next((reason for pattern, reason in SCHEMA_RISKS if re.search(pattern, sql, re.IGNORECASE)), None)
+        table = (re.search(r'(?:ALTER TABLE|ON|INTO|UPDATE)\s+(?:ONLY\s+)?"?(\w+)"?', sql, re.IGNORECASE) or [None, None])[1]
+        plan.append({"sql": sql, "risk": risk, "table": table, "rows": max(rows.get(table, 0), 0) if table else None, "is_routine": any(re.search(pattern, sql) for pattern in SCHEMA_ROUTINE) or sql in func_postgres_schema_sql_queries(config_postgres.get("sql", {}))})
+    return plan

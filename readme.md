@@ -1,4 +1,6 @@
 # Atom
+Version 3.25.0
+
 Batteries-included FastAPI framework for production backends: auth, CRUD over any table, caching, rate limits, queues, workers, web pages and optional integrations, all driven by config. Your code lives in `*_extend` paths, so updating Atom never overwrites it.
 
 Details: [docs/about.md](docs/about.md)
@@ -18,9 +20,11 @@ git init
 curl -fsSL -o sync.py https://raw.githubusercontent.com/atom36942/atom/main/sync.py
 python3 sync.py
 
-# 3. run, then open http://localhost:8000
+# 3. run, then open http://localhost:8000 (another port, e.g. two projects at once: the last two lines, then http://localhost:8001)
 venv/bin/python main.py
 venv/bin/uvicorn main:app --reload
+PORT=8001 venv/bin/python main.py
+venv/bin/uvicorn main:app --reload --port 8001
 ```
 
 Windows: [docs/windows.md](docs/windows.md)
@@ -84,9 +88,9 @@ Details: [docs/sync.md](docs/sync.md)
 
 # Test
 ```bash
-venv/bin/ruff check .
-venv/bin/python -m unittest discover -s tests_extend -t .
+venv/bin/python -m script.check
 ```
+Runs the startup checks, ruff, the pages' JavaScript and the tests in `tests_extend/` together and prints one summary line, plus only the failures.
 
 # Contributing
 To work on Atom itself:
@@ -96,8 +100,7 @@ cd atom
 python3.14 -m venv venv
 venv/bin/pip install --upgrade pip
 venv/bin/pip install -r requirements.txt
-venv/bin/ruff check .
-venv/bin/python -m unittest discover -s tests -t .
+venv/bin/python -m script.check
 ```
 
 Then open a pull request against `main`. Details: [tests/README.md](tests/README.md)

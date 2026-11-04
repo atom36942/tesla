@@ -289,7 +289,7 @@ curl -G "$BASE_URL/my/object-read-export" \
   -o task.csv
 ```
 
-Rows are read in batches of 1000 and streamed, up to `config_export_limit` rows (default 50000). Invalid input returns a normal JSON error before the download starts. Dates are ISO 8601, JSON and array columns are JSON text, and text starting with `=`, `+`, `-`, `@`, tab, or carriage return gets a leading `'` so spreadsheets show it instead of running it as a formula. Unlike `/my/object-read`, `/my/object-read-export` with `received_by_id` does not mark messages as read.
+Rows are read in batches of 1000 and streamed, up to `config_export_limit` rows (default 50000). Sorted by `id` alone (the default `id desc`, or `id asc`) with `id` among the exported columns, each batch continues after the last id sent (`func_postgres_read`'s `after_id`), so every batch is an index range and rows added during the download never repeat or shift; any other sort pages with `OFFSET`. Invalid input returns a normal JSON error before the download starts. Dates are ISO 8601, JSON and array columns are JSON text, and text starting with `=`, `+`, `-`, `@`, tab, or carriage return gets a leading `'` so spreadsheets show it instead of running it as a formula. Unlike `/my/object-read`, `/my/object-read-export` with `received_by_id` does not mark messages as read.
 
 ### Distinct and group-by (separate admin endpoints)
 
@@ -324,10 +324,10 @@ Both accept optional `connection` and `filter`. Distinct takes a string `col`; g
 
 ## 5. Record Updating (`PUT /*/object-update`)
 
-Executes single or bulk updates efficiently using dynamic SQL `CASE` statements in a single database round-trip.
+Executes single or bulk updates in one transaction, up to 5,000 rows per statement.
 
 ### Features:
-- **Bulk CASE Updates**: Updates hundreds of distinct records with different values in one atomic statement.
+- **Bulk Updates**: Each row can get different values. When every updated column has a simple type (numbers, boolean, text, uuid, dates and times), each column is sent as one array and joined on `id` (`UPDATE ... FROM unnest($1::bigint[], $2::text[], ...)`), so cost grows in a straight line with the rows; JSON, array and PostGIS columns use a `CASE` per column. If an `id` repeats in one request, its first values are used.
 - **Audit Stamping**: Automatically stamps `updated_at = now()` and `updated_by_id = current_user.id`.
 - **Ownership Verification**: `/my/object-update` defaults to `created_by_id` and accepts only columns from `config_column_ownership_update`. The selected column is matched to the authenticated user ID.
 

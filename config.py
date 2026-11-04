@@ -19,6 +19,8 @@ config_sftp_host = None
 config_sftp_port = None
 config_sftp_username = None
 config_sftp_password = None
+config_sftp_known_hosts_path = None
+config_sftp_is_host_verify = True
 config_aws_access_key_id = None
 config_aws_secret_access_key = None
 config_aws_s3_region_name = None
@@ -49,8 +51,11 @@ config_is_pgweb_enabled = False
 config_is_fastapi_telemetry = False
 config_is_uvicorn_access_log = False
 config_uvicorn_timeout_keep_alive_sec = 250
+config_request_body_max_kb = 10240
+config_request_form_max_kb = 102400
 config_redis_cache_ttl_sec = 3600
 config_inmemory_cache_cleanup_auto_sec = 300
+config_api_cache_inmemory_max_kb = 102400
 config_cors_allow_origins = []
 config_cors_allow_origin_regex = None
 config_cors_allow_methods = ["*"]
@@ -79,6 +84,7 @@ config_is_profile_update_last_active_at = True
 
 # postgres
 config_is_postgres_schema_init = True
+config_postgres_schema_lock_timeout_sec = 10
 config_postgres_pool_min_size = 5
 config_postgres_pool_max_size = 20
 config_is_log_api = True
@@ -109,6 +115,8 @@ config_blob_expire_sec_preview = 360000
 
 # service
 config_queue_services = ["redis", "rabbitmq", "kafka", "celery"]
+config_queue_concurrency = 10
+config_queue_retry_max = 3
 config_blob_services = ["s3", "azure"]
 config_email_services = ["ses", "resend", "azure"]
 config_mobile_services = ["sns", "fast2sms", "azure"]
@@ -311,7 +319,8 @@ config_postgres = {
 {"name":"query_param","datatype":"text"},
 {"name":"status_code","datatype":"smallint","index":"btree(status_code)"},
 {"name":"response_time_ms","datatype":"integer"},
-{"name":"error","datatype":"text"}
+{"name":"error","datatype":"text"},
+{"name":"request_id","datatype":"text"}
 ],
 "log_users_password":[
 {"name":"id","datatype":"bigint","identity":"always","is_primary": True},
@@ -352,6 +361,7 @@ config_api = {
 # index
 "/": {"id": 35, "is_token": False},
 "/health": {"id": 36, "is_token": False},
+"/health-ready": {"id": 135, "is_token": False, "is_log_api": False, "cache": {"mode": "inmemory", "ttl_sec": 5, "is_per_user": False}},
 "/info": {"id": 17, "is_token": False, "cache": {"mode": "inmemory", "ttl_sec": 300, "is_per_user": False}},
 "/openapi.json": {"id": 37, "is_token": False},
 "/static": {"id": 77, "is_token": False},

@@ -16,7 +16,9 @@ config_postgres_url_replica1=postgresql://reader:secret@replica-host:5432/atom
 config_postgres_url_analytics=postgresql://analyst:secret@analytics-host:5432/warehouse
 config_postgres_pool_min_size=5
 config_postgres_pool_max_size=20
+config_postgres_pool_max_size_analytics=3    # optional, per database: analytics gets at most 3, the others 20
 ```
+`config_postgres_pool_min_size_<name>` / `config_postgres_pool_max_size_<name>` size one database's pool; a database without them uses the shared two. The same works for SQL Server (`config_mssql_pool_min_size_<name>`, `config_mssql_pool_max_size_<name>`). A size for a name that has no URL (a typo such as `_tset`), or a max below its min, stops startup.
 Each name becomes a pool in `app.state.client_postgres_dict` (for example `client_postgres_dict["master"]`) with its schema in `app.state.cache_postgres_schema_dict`. Code that always uses the main database reads `client_postgres_dict["master"]`. Every URL needs a name: an unsuffixed `config_postgres_url` (also `config_redis_url`, `config_clickhouse_url`, `config_mssql_url`) or an empty `config_postgres_url_` stops startup.
 Routes flagged `"is_connection_param": True` in `config_api` take `?connection=<name>`; the middleware sets `request.state.client_postgres` and `request.state.cache_postgres_schema` (master when `connection` is omitted, 404 for an unknown name). Other routes always use master and reject `?connection=` with 400:
 ```bash
@@ -33,6 +35,16 @@ When `config_is_postgres_schema_init = True`, Atom inspects and automatically mi
 - Adds missing columns and alters types if necessary.
 - Installs unique constraints and indexes from `config_postgres["index"]`.
 - Seeds the root admin user (`admin` / `role: 1`) and attaches the root protection trigger.
+
+It reads the current tables, columns, indexes, constraints and triggers once (a few catalog queries for all tables), then changes only what differs from `config_postgres`; an unchanged database takes about 14 queries, so a start against a remote database stays near one second. Tables, the root user and triggers change in one transaction: other sessions see the old schema or the new one, and a delete guard is never missing while an instance starts. A trigger is recreated only when its definition differs, so a guard removed or edited by hand is put back on the next start. Extensions run before that transaction (a missing privilege is skipped) and custom `sql` after it.
+
+**Busy tables and big changes.** In that transaction each table lock is waited for at most `config_postgres_schema_lock_timeout_sec` (10 s): when another session holds a table that long, startup stops with `schema init: a table stayed locked ... nothing was changed` instead of hanging the deploy, and the whole change rolls back. To see what the next start would change before deploying, run the plan with the new code against the target database:
+
+```bash
+venv/bin/python -m script.schema_plan
+```
+
+It reads the catalog on a read-only connection, changes nothing, and prints each change, flagging the ones that lock or rewrite a table (`ALTER COLUMN ... TYPE`, `SET NOT NULL`, `CREATE INDEX` without `CONCURRENTLY`, `DROP`) with the table's estimated rows. A flagged change on a big table is better run by hand when it is quiet; the next start then finds nothing to change. Statements that run on every start (trigger functions, the root user) are only counted.
 
 ---
 
