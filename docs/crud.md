@@ -110,10 +110,15 @@ curl -G "$BASE_URL/my/object-read" \
 This returns the second page of tasks created by the logged-in user. If an order omits `id`, the reader adds `id desc` as a tie-breaker when the table has that column. `/my/object-read` returns:
 
 ```json
-{"status": 1, "message": {"obj_list": [], "has_more": false, "has_next_page": false}}
+{"status": 1, "message": {"obj_list": [], "has_more": false, "has_next_page": false, "next_after_id": null}}
 ```
 
-Increment `page` while `has_next_page` is true. These flags indicate another page, not a total count. Public and admin reads return `obj_list` and `has_next_page`; they do not currently include `has_more`.
+Every list read fetches one row more than `limit`: `has_next_page` says whether another page exists, never a total count (no `count(*)`, which gets slow as a table grows). Page one of two ways:
+
+- **After the last id (fastest, use it for growing tables):** order `id desc` (the default) or `id asc`, and send `after_id` = the previous page's `next_after_id` (the last row's id; `null` on the last page). Every page is an index range, as fast on page 1,000 as on page 1, and rows added meanwhile never repeat or shift. Another order with `after_id` is a 400.
+- **By page number:** `page=2, 3, …` while `has_next_page` is true, for any order. It skips rows with `OFFSET`, which Postgres still reads, so deep pages slow down; keep it for short lists or custom sorts.
+
+`/my`, `/private`, `/public` and `/admin` `object-read` all return `obj_list`, `has_next_page` and `next_after_id` (`/my` also `has_more`, the same as `has_next_page`).
 
 ### Filters: comparisons, text search, lists, ranges, and nulls
 
@@ -278,7 +283,7 @@ Each object-read route has a CSV export with the same access and rules, download
 | `/public/object-read-export` | none | tables in the public read policy |
 | `/admin/object-read-export` | admin role | any table |
 
-They accept `table`, `filter`, `order`, `column`, and `connection` with the same meaning as the matching object-read route, and nothing else: no `limit`, `page`, or `relation`. Blocked columns such as `password` are never exported, including by admins.
+They accept `table`, `filter`, `order`, `column`, and `connection` with the same meaning as the matching object-read route, plus an optional `limit` (rows wanted, 1 to `config_export_limit`; larger is a 400), and nothing else: no `page` or `relation`. Blocked columns such as `password` are never exported, including by admins.
 
 ```bash
 curl -G "$BASE_URL/my/object-read-export" \
@@ -289,7 +294,7 @@ curl -G "$BASE_URL/my/object-read-export" \
   -o task.csv
 ```
 
-Rows are read in batches of 1000 and streamed, up to `config_export_limit` rows (default 50000). Sorted by `id` alone (the default `id desc`, or `id asc`) with `id` among the exported columns, each batch continues after the last id sent (`func_postgres_read`'s `after_id`), so every batch is an index range and rows added during the download never repeat or shift; any other sort pages with `OFFSET`. Invalid input returns a normal JSON error before the download starts. Dates are ISO 8601, JSON and array columns are JSON text, and text starting with `=`, `+`, `-`, `@`, tab, or carriage return gets a leading `'` so spreadsheets show it instead of running it as a formula. Unlike `/my/object-read`, `/my/object-read-export` with `received_by_id` does not mark messages as read.
+The export is one query read with a cursor in a read-only transaction and streamed in 64 KB chunks, up to `config_export_limit` rows (default 1,000,000), whatever the sort: no count, no `OFFSET`, flat memory, and one snapshot, so rows added during the download never repeat or shift. Invalid input returns a normal JSON error before the download starts. Every export in Atom and in projects goes through the same functions (`func_postgres_export`, `func_mssql_export`, `func_clickhouse_export`). Dates are ISO 8601, JSON and array columns are JSON text, and text starting with `=`, `+`, `-`, `@`, tab, or carriage return gets a leading `'` so spreadsheets show it instead of running it as a formula. Unlike `/my/object-read`, `/my/object-read-export` with `received_by_id` does not mark messages as read.
 
 ### Distinct and group-by (separate admin endpoints)
 
