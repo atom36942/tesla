@@ -107,9 +107,8 @@ async def func_request_param_read(*, request: Request, mode: str, param_specs: l
         "file": lambda v: [x for x in (v if isinstance(v, list) else [v] if v is not None else []) if hasattr(x, "file")],
         "list": smart_list
     }
-    if reject_unknown:
-        names = {spec["name"] for spec in param_specs}
-        if set(params_dict) - names: raise Exception("request contains unknown parameters")
+    names = {spec["name"] for spec in param_specs}
+    if reject_unknown and set(params_dict) - names: raise Exception("request contains unknown parameters")
     output_dict = params_dict.copy() if not strict else {}
     for param_spec in param_specs:
         if not isinstance(param_spec, dict): raise Exception(f"invalid parameter specification: expected dict, got {type(param_spec)}")

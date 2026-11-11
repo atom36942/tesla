@@ -21,10 +21,27 @@ config_postgres_pool_max_size_analytics=3    # optional, per database: analytics
 `config_postgres_pool_min_size_<name>` / `config_postgres_pool_max_size_<name>` size one database's pool; a database without them uses the shared two. The same works for SQL Server (`config_mssql_pool_min_size_<name>`, `config_mssql_pool_max_size_<name>`). A size for a name that has no URL (a typo such as `_tset`), or a max below its min, stops startup.
 `config_postgres_query_timeout_sec` (default `0`, no limit) cancels any query on the app's pools that runs longer, so a hung query cannot hold a pool connection for good; it applies to startup's schema changes and exports too. If startup fails while opening the pools, the ones already open are closed.
 Each name becomes a pool in `app.state.client_postgres_dict` (for example `client_postgres_dict["master"]`) with its schema in `app.state.cache_postgres_schema_dict`. Code that always uses the main database reads `client_postgres_dict["master"]`. Every URL needs a name: an unsuffixed `config_postgres_url` (also `config_redis_url`, `config_clickhouse_url`, `config_mssql_url`) or an empty `config_postgres_url_` stops startup.
-Routes flagged `"is_connection_param": True` in `config_api` take `?connection=<name>`; the middleware sets `request.state.client_postgres` and `request.state.cache_postgres_schema` (master when `connection` is omitted, 404 for an unknown name). Other routes always use master and reject `?connection=` with 400:
+
+### Picking a database per request (`?connection=<name>`)
+`connection` is the one query parameter that picks which PostgreSQL database a request uses. Its value is a `<name>` from a `config_postgres_url_<name>` line in `.env` (`master`, `replica1`, `analytics`, ...).
+
+| Situation | What happens |
+| :--- | :--- |
+| `connection` left out | The request uses `master` (the default) |
+| `connection=<name>` on a route flagged `"is_connection_param": True` in `config_api` | The middleware (`func_middleware_postgres_select`) sets `request.state.client_postgres` to that database's pool and `request.state.cache_postgres_schema` to its schema from `cache_postgres_schema_dict[<name>]`; the route reads, filters and checks columns against that database |
+| `connection=<name>` where `<name>` has no `config_postgres_url_<name>` | 404 |
+| `connection=...` on a route without the flag | 400 `connection not allowed on this route`; the route always uses master |
+
+Routes Atom flags (all reads): `/my/profile`, `/my/object-read`, `/my/object-read-export`, `/my/message-inbox`, `/my/message-thread`, `/private/object-read`, `/private/object-read-export`, `/private/users-list`, `/private/table-column-groupby`, `/private/table-column-distinct`, `/public/object-read`, `/public/object-read-export`, `/public/table-column-groupby`, `/public/table-column-distinct`, `/admin/object-read`, `/admin/object-read-export`, `/admin/table-column-groupby`, `/admin/table-column-distinct`, `/admin/postgres-schema`, `/admin/postgres-info`, `/admin/postgres-slow-queries`, `/admin/postgres-slow-queries-reset`, `/admin/postgres-query-runner-read`, `/admin/postgres-query-runner-read-export`, `/admin/postgres-query-generator-ai`, `/admin/postgres-import` and `/admin/monitor` (its Database tab). The list in `config_api` is the source of truth; a project flags its own routes the same way.
+
+Writes (`object-create`, `object-update`, `object-delete`, the `user-*` routes, `/admin/postgres-query-runner-write`) are not flagged, so they always go to master. SQL Server and ClickHouse routes pick their server with a body field also named `connection` (see section 3).
 ```bash
-curl "http://localhost:8000/public/object-read?table=products&connection=replica1"
+curl "http://localhost:8000/public/object-read?table=products&connection=replica1"    # replica1
+curl "http://localhost:8000/public/object-read?table=products"                        # master
+curl -H "Authorization: Bearer $TOKEN" "http://localhost:8000/admin/postgres-schema?connection=analytics"
 ```
+
+**The schema per database.** `cache_postgres_schema_dict` holds every database's tables and columns (type, nullable, default, primary key, unique, indexes), read with `func_postgres_schema_read` at startup and again by `GET /admin/sync`. `GET /admin/postgres-schema` returns that cache for the chosen database (master, or `?connection=<name>`) without querying the database, as `{table: {column: {...}}}` with `datatype`, `is_nullable` (`"YES"` or `"NO"`, as in `information_schema`), `column_default`, `is_primary`, `is_unique`, `is_index`, `index_names` and `relation_type` per column, so it shows exactly the columns Atom checks requests against. A column added by hand in SQL appears there, and in the CRUD routes, after `/admin/sync` or a restart.
 
 ---
 
@@ -89,19 +106,13 @@ Atom runs a periodic background task (`func_postgres_buffer_flush_periodic_task`
 
 ## 5. API Logging & Telemetry (`log_api`)
 
-Atom captures structured telemetry for every incoming request in the `log_api` table (failed writes are counted on the Monitor page's Background tab, `GET /admin/monitor?view=background`; rows wait in the buffer and are retried):
+Atom writes one row to the `log_api` table for every request to a `config_api` route (failed writes are counted on the Monitor page's Background tab, `GET /admin/monitor?view=background`; rows wait in the buffer and are retried). Routes with `"is_log_api": False` and paths that are not routes (static files, `/favicon.ico`, 404s) are left out; `config_is_log_api_all` logs those too.
 
-### Telemetry Captured:
-- `created_at`: Timestamp of the request.
-- `user_id`: Authenticated user ID (or null).
-- `client_ip`: Client IP address.
-- `path`: Request path.
-- `method`: HTTP method (GET, POST, etc.).
-- `status_code`: HTTP response status.
-- `response_time_ms`: Execution duration in milliseconds.
-- `response_type`: Execution path (`cache_response`, `direct_cache_set`, `background_added`, `error`).
-- `request_query`, `request_body`: Input payloads.
-- `error`: Exception message and traceback on failures.
+### Columns:
+- `created_at`, `created_by_id` (the user, or null), `ip_address`, `method`, `path`, `request_id` (sent back as `x-request-id`).
+- `query_param`: the query string, secret and opaque values masked.
+- `status_code`, `response_time_ms`, `response_type` (`cache_response`, `direct_no_cache_set`, `direct_cache_set`, `background_added`, `error`), `error`.
+- `request_header`, `request_body`, `response_body`: filled only with `config_is_log_api_detail` (JSON bodies only, up to `config_log_api_detail_max_kb`, secrets masked; see [config.md](config.md)).
 
 ### Storing Logs in an Isolated Database:
 To keep high-volume log writes from contending with business transactions, route API logs to a dedicated PostgreSQL database:

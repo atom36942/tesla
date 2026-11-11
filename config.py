@@ -89,6 +89,9 @@ config_postgres_pool_min_size = 1
 config_postgres_pool_max_size = 10
 config_postgres_query_timeout_sec = 0    # longest a single Postgres query may run, in seconds, then it is cancelled; 0 means no limit
 config_is_log_api = True
+config_is_log_api_all = False
+config_is_log_api_detail = False
+config_log_api_detail_max_kb = 64
 config_postgres_db_log_api = "master"
 config_log_api_retention_day = 7
 config_buffer_limit_default = 100
@@ -97,6 +100,7 @@ config_postgres_buffer_flush_auto_sec = 60
 config_batch_item_limit = 1000
 config_sql_read_limit_default = 100
 config_sql_read_limit_max = 10000
+config_page_offset_max = 10000
 config_sql_read_relation_fetch_limit_max = 100
 
 # mssql
@@ -322,7 +326,10 @@ config_postgres = {
 {"name":"status_code","datatype":"smallint","index":"btree(status_code)"},
 {"name":"response_time_ms","datatype":"integer"},
 {"name":"error","datatype":"text"},
-{"name":"request_id","datatype":"text"}
+{"name":"request_id","datatype":"text"},
+{"name":"request_header","datatype":"jsonb"},
+{"name":"request_body","datatype":"text"},
+{"name":"response_body","datatype":"text"}
 ],
 "log_users_password":[
 {"name":"id","datatype":"bigint","identity":"always","is_primary": True},
@@ -361,8 +368,8 @@ config_postgres = {
 
 config_api = {
 # index
-"/": {"id": 35, "is_token": False},
-"/health": {"id": 36, "is_token": False},
+"/": {"id": 35, "is_token": False, "is_log_api": False},
+"/health": {"id": 36, "is_token": False, "is_log_api": False},
 "/health-ready": {"id": 135, "is_token": False, "is_log_api": False, "cache": {"mode": "inmemory", "ttl_sec": 5, "is_per_user": False}},
 "/info": {"id": 17, "is_token": False, "cache": {"mode": "inmemory", "ttl_sec": 300, "is_per_user": False}},
 "/openapi.json": {"id": 37, "is_token": False},
@@ -444,7 +451,7 @@ config_api = {
 "/admin/blob-container-ops": {"id": 12, "is_token": True, "user_check_role": {"mode": "token", "roles": [1]}},
 "/admin/blob-delete-url": {"id": 13, "is_token": True, "user_check_role": {"mode": "token", "roles": [1]}},
 "/admin/postgres-info": {"id": 84, "is_token": True, "user_check_role": {"mode": "token", "roles": [1]}, "cache": {"mode": "inmemory", "ttl_sec": 300, "is_per_user": False}, "is_connection_param": True},
-"/admin/postgres-schema": {"id": 85, "is_token": True, "user_check_role": {"mode": "token", "roles": [1]}, "cache": {"mode": "inmemory", "ttl_sec": 300, "is_per_user": False}, "is_connection_param": True},
+"/admin/postgres-schema": {"id": 85, "is_token": True, "user_check_role": {"mode": "token", "roles": [1]}, "is_connection_param": True},
 "/admin/postgres-slow-queries": {"id": 121, "is_token": True, "user_check_role": {"mode": "token", "roles": [1]}, "is_connection_param": True},
 "/admin/postgres-slow-queries-reset": {"id": 122, "is_token": True, "user_check_role": {"mode": "realtime", "roles": [1]}, "is_connection_param": True},
 "/admin/postgres-query-runner-write": {"id": 6, "is_active": True, "is_token": True, "user_check_role": {"mode": "realtime", "roles": [1]}},
