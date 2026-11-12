@@ -1,3 +1,5 @@
+# type: continuous
+
 # command: venv/bin/python -m script_extend.worker_resume_parser
 
 # info: Polls jobseeker rows with a resume (S3/Azure link or stored text) and fills their profile with Gemini.
