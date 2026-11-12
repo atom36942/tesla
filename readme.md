@@ -1,5 +1,5 @@
 # Atom
-Version 6.2.1
+Version 7.1.0
 
 Batteries-included FastAPI framework for production backends: auth, CRUD over any table, caching, rate limits, queues, workers, web pages and optional integrations, all driven by config. Your code lives in `*_extend` paths, so updating Atom never overwrites it.
 
@@ -44,14 +44,14 @@ Optional:
 config_is_pgweb_enabled=true
 config_is_prod=false
 config_is_log_api=false
-config_signup_allowed_roles=[2]
-config_root_html_path=static_extend/<app>/index.html
 config_cors_allow_origins=["http://localhost:5173"]
 config_redis_url_api_response=redis://localhost:6379/0
 config_redis_url_user_state=redis://localhost:6379/0
 config_redis_url_ratelimiter=redis://localhost:6379/0
 config_redis_url_queue=redis://localhost:6379/0
 ```
+
+Keep `.env` to secrets and per-environment values; settings that are the same everywhere (`config_root_html_path`, `config_signup_allowed_roles`) usually go in `config_extend.py`.
 
 Layout: `# atom` (Atom's keys), `# extend` (the project's keys), then `# script.<name>` listing every key one script reads, all commented out until a developer runs that script.
 
@@ -86,7 +86,7 @@ python3 sync.py --status                     # Atom version of this project and 
 
 Details: [docs/sync.md](docs/sync.md)
 
-# Test
+# Check (startup, ruff, pages, tests)
 ```bash
 venv/bin/python -m script.check
 ```
@@ -115,7 +115,7 @@ Then open a pull request against `main`. Details: [tests/README.md](tests/README
 
 # Docs
 - **Start:** [quickstart](docs/quickstart.md) · [about](docs/about.md) · [config](docs/config.md) · [extend](docs/extend.md) · [sync](docs/sync.md) · [windows](docs/windows.md) · [faq](docs/faq.md) · [AGENTS.md](AGENTS.md)
-- **Features:** [auth](docs/auth.md) · [crud](docs/crud.md) · [pages](docs/page.md) · [ownership](docs/ownership.md) · [database](docs/database.md) · [redis](docs/redis.md) · [queue](docs/queue.md) · [messaging](docs/messaging.md) · [storage](docs/storage.md)
+- **Features:** [auth](docs/auth.md) · [crud](docs/crud.md) · [pages](docs/page.md) · [ownership](docs/ownership.md) · [database](docs/database.md) · [schedule](docs/schedule.md) · [redis](docs/redis.md) · [queue](docs/queue.md) · [messaging](docs/messaging.md) · [storage](docs/storage.md)
 - **Operate:** [admin](docs/admin.md) · [performance](docs/performance.md) · [security](docs/security.md) · [audit](docs/audit.md) · [tests](tests/README.md)
 
 # License

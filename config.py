@@ -53,9 +53,8 @@ config_is_uvicorn_access_log = False
 config_uvicorn_timeout_keep_alive_sec = 250
 config_request_body_max_kb = 10240
 config_request_form_max_kb = 102400
-config_redis_cache_ttl_sec = 3600
-config_inmemory_cache_cleanup_auto_sec = 300
-config_api_cache_inmemory_max_kb = 102400
+
+# cors
 config_cors_allow_origins = []
 config_cors_allow_origin_regex = None
 config_cors_allow_methods = ["*"]
@@ -63,24 +62,29 @@ config_cors_allow_headers = ["*"]
 config_cors_expose_headers = ["*"]
 config_cors_allow_credentials = True
 
+# cache
+config_redis_cache_ttl_sec = 3600
+config_inmemory_cache_cleanup_auto_sec = 300
+config_api_cache_inmemory_max_kb = 102400
+config_token_cache_max = 10000
+
 # auth
 config_root_user_password = None
 config_login_password = None
 config_token_secret_key = None
 config_access_token_expires_sec = 604800
 config_refresh_token_expires_sec = 2592000
-config_token_cache_max = 10000
 config_signup_allowed_roles = []
 config_login_allowed_roles = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
+config_is_user_delete = False
+config_is_profile_update_last_active_at = True
+
+# otp
 config_otp_length = 6
 config_otp_expiry_sec = 600
 config_otp_static = None
 config_otp_max_attempt = 5
-config_otp_retention_day = 1
 config_is_otp_require_users_update = False
-config_is_user_delete = False
-config_users_delete_retention_day = 30
-config_is_profile_update_last_active_at = True
 
 # postgres
 config_is_postgres_schema_init = True
@@ -88,20 +92,29 @@ config_postgres_schema_lock_timeout_sec = 10
 config_postgres_pool_min_size = 1
 config_postgres_pool_max_size = 10
 config_postgres_query_timeout_sec = 0    # longest a single Postgres query may run, in seconds, then it is cancelled; 0 means no limit
+config_buffer_limit_default = 100
+config_buffer_rows_max = 100000
+config_postgres_buffer_flush_auto_sec = 60
+
+# log_api
 config_is_log_api = True
 config_is_log_api_all = False
 config_is_log_api_detail = False
 config_log_api_detail_max_kb = 64
+config_is_log_api_detail_mask = False
 config_postgres_db_log_api = "master"
-config_log_api_retention_day = 7
-config_buffer_limit_default = 100
-config_buffer_rows_max = 100000
-config_postgres_buffer_flush_auto_sec = 60
-config_batch_item_limit = 1000
-config_sql_read_limit_default = 100
-config_sql_read_limit_max = 10000
-config_page_offset_max = 10000
-config_sql_read_relation_fetch_limit_max = 100
+
+# schedule
+config_schedule_timezone = "UTC"
+config_schedule_check_sec = 600
+config_schedule_cleanup = "every 1h"
+config_schedule_postgres_backup = "off"
+
+# retention
+config_retention_day_otp = 1
+config_retention_day_log_api = 7
+config_retention_day_users_delete = 30
+config_retention_day_script_run = 90
 
 # mssql
 config_mssql_pool_min_size = 1
@@ -109,6 +122,11 @@ config_mssql_pool_max_size = 10
 config_mssql_pool_recycle_sec = 1800
 
 # query
+config_sql_read_limit_default = 100
+config_sql_read_limit_max = 10000
+config_page_offset_max = 10000
+config_sql_read_relation_fetch_limit_max = 100
+config_batch_item_limit = 1000
 config_query_runner_read_limit = 5000
 config_export_limit = 1000000
 
@@ -130,8 +148,8 @@ config_ai_services = ["gemini", "openai"]
 
 # table
 config_table_exclude_from_users_delete = ["spatial_ref_sys", "users", "log_users_delete"]
-config_table_my_create_blocked = ["users", "log_api", "log_users_password", "otp", "spatial_ref_sys"]
-config_table_my_read_blocked = ["users", "config", "log_users_password", "otp", "spatial_ref_sys"]
+config_table_my_create_blocked = ["users", "log_api", "log_users_password", "otp", "script_run", "spatial_ref_sys"]
+config_table_my_read_blocked = ["users", "config", "log_users_password", "otp", "script_run", "spatial_ref_sys"]
 config_table_my_delete_all_allowed = ["test", "message", "notification"]
 config_table_public_create_allowed = ["test"]
 config_table_public_read_allowed = ["test"]
@@ -176,8 +194,14 @@ config_options = {
 }
 
 config_column_int_mapping = {
+"users": {
+"role": {1: "Admin"},
+},
 "blob": {
 "type": {1: "File", 2: "Presigned Url"},
+},
+"script_run": {
+"status": {1: "Running", 2: "Done", 3: "Failed"},
 },
 "log_users_delete": {
 "type": {1: "User Soft Deleted", 2: "User Restored", 3: "User Hard Deleted"},
@@ -328,6 +352,7 @@ config_postgres = {
 {"name":"error","datatype":"text"},
 {"name":"request_id","datatype":"text"},
 {"name":"request_header","datatype":"jsonb"},
+{"name":"response_header","datatype":"jsonb"},
 {"name":"request_body","datatype":"text"},
 {"name":"response_body","datatype":"text"}
 ],
@@ -337,6 +362,19 @@ config_postgres = {
 {"name":"created_by_id","datatype":"bigint"},
 {"name":"user_id","datatype":"bigint"},
 {"name":"password","datatype":"text"}
+],
+"script_run":[
+{"name":"id","datatype":"bigint","identity":"always","is_primary": True},
+{"name":"created_at","datatype":"timestamptz","default":"now()","index":"btree(script,created_at)"},
+{"name":"updated_at","datatype":"timestamptz"},
+{"name":"script","datatype":"text","is_mandatory": True},
+{"name":"started_by","datatype":"text","is_mandatory": True,"in":("schedule","manual")},
+{"name":"host","datatype":"text"},
+{"name":"status","datatype":"smallint","is_mandatory": True,"default":1,"in":(1,2,3)},
+{"name":"step","datatype":"text"},
+{"name":"message","datatype":"text"},
+{"name":"peak_memory_mb","datatype":"integer"},
+{"name":"finished_at","datatype":"timestamptz"}
 ],
 "log_users_delete":[
 {"name":"id","datatype":"bigint","identity":"always","is_primary": True},
