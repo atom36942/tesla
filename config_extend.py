@@ -71,5 +71,6 @@ config_postgres = {
 },
 }
 
-# misc
 config_signup_allowed_roles = [2]
+
+# extend
