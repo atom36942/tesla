@@ -166,6 +166,7 @@ config_table_public_create_allowed = ["test"]
 config_table_public_read_allowed = ["test"]
 config_mongodb_my_create_allowed = {"test": ["post"]}
 config_table_private_read_allowed = ["test"]
+config_table_private_write_allowed = []
 
 # column
 config_column_token_encode = ["id", "role", "username", "id_ext" ,"deactivated_at", "deleted_at", "permissions"]
@@ -177,7 +178,7 @@ config_column_single_update = ["username", "password", "email", "mobile"]
 config_column_users_blocked = ["created_at", "created_by_id", "updated_at", "updated_by_id", "deleted_at", "deleted_by_id", "is_protected", "last_active_at"]
 config_column_users_my_blocked = ["role", "permissions", "verified_at", "verified_by_id", "deactivated_at", "deactivated_by_id", "parent_id", "source", "id_ext", "google_login_id", "google_login_metadata"]
 config_column_read_blocked = ["password"]
-config_column_users_private_read = ["id", "username", "role", "created_at", "deactivated_at"]
+config_column_users_private_read = ["id", "username", "name", "role", "permissions", "created_at", "deactivated_at"]
 
 # dict
 config_column_regex = {
@@ -197,7 +198,7 @@ config_options = {
 config_column_int_mapping = {
 "users": {
 "role": {1: "Admin"},
-"permissions": {6: "Postgres query runner write", 132: "User delete"},
+"permissions": {6: "Postgres query runner write", 132: "User delete", 136: "Update any row", 137: "Delete any row"},
 },
 "blob": {
 "type": {1: "File", 2: "Presigned Url"},
@@ -470,6 +471,8 @@ config_api = {
 "/private/object-read-export": {"id": 125, "is_token": True, "is_connection_param": True},
 "/private/user-read": {"id": 112, "is_token": True, "is_connection_param": True},
 "/private/table-column-groupby": {"id": 107, "is_token": True, "cache": {"mode": "inmemory", "ttl_sec": 10, "is_per_user": False}, "is_connection_param": True},
+"/private/object-update": {"id": 136, "is_token": True, "user_check_permission": {"mode": "token"}},
+"/private/object-delete": {"id": 137, "is_token": True, "user_check_permission": {"mode": "token"}, "rate_limit": {"mode": "inmemory", "limit": 10, "window_sec": 60}},
 "/private/table-column-distinct": {"id": 108, "is_token": True, "cache": {"mode": "inmemory", "ttl_sec": 10, "is_per_user": False}, "is_connection_param": True},
 # admin
 "/admin/sync": {"id": 1, "is_token": True, "user_check_role": {"mode": "realtime", "roles": [1]}},
