@@ -93,8 +93,11 @@ Use `curl -G --data-urlencode` for query parameters containing spaces, JSON, com
 | `limit` | `int` | `config_sql_read_limit_default` (100) | Positive page size. Requests exceeding `config_sql_read_limit_max` (10,000) are rejected. |
 | `postgres` | `str` | master | Configured database name, e.g. `read` for `config_postgres_url_read`. Unknown name is 404. |
 | `ownership_column` | `str` | `created_by_id` | `/my/object-read` only: column from `config_column_ownership_read` matched to the logged-in user's ID. |
+| `group_column` + `group_values` | `str` + JSON list | none | The first page of each value instead of one list, in one statement (a board: a column per status): `group_column=status&group_values=[1,2,3]` returns `{"groups": {"1": {"obj_list", "after"}, ...}}`, every value present (empty ones too), at most 50 values; filters, `order`, `column` and `limit` apply to each value. A value's next page is a plain read with `filter` `status = 1` added and that value's `after`. Not with `after`, `page` or `relation`; not on array or JSON columns. An index on (`group_column`, the order columns) serves each value without a scan. |
 
 `/public/object-read` and `/admin/object-read` accept the same parameters except `ownership_column`. Public reads require permitted tables and relations; admin reads require admin authorization and do not add user ownership filtering. Blocked columns cannot be explicitly selected or filtered; `column=*` removes them from results.
+
+`/private/user-read` (token) is the user list for any logged-in user: `filter`, `order`, `after`, `page` and `limit` as above, always on `users` and always the columns in `config_column_users_private_read` (`id`, `username`, `role`, `created_at`, `deactivated_at`). Every other `users` column is blocked from its columns, filters and order, so `filter=["role = 2","deactivated_at is null","username ilike %ann%"]` works and `filter=["mobile ilike %98%"]` is a 400. A project that adds a column to that list makes it readable to every logged-in user.
 
 ### Basic selection and sorting
 
@@ -115,7 +118,7 @@ This returns the first 20 tasks created by the logged-in user, highest priority 
 
 ### Paging
 
-Every list in Atom pages **after a cursor** by default, and can **jump to a page number** within the first rows; never with a total count. The same rule holds for `object-read`, `/private/users-list`, `table-column-groupby`, `table-column-distinct`, `/my/message-inbox`, `/my/message-thread`, pgweb's rows and every project list route.
+Every list in Atom pages **after a cursor** by default, and can **jump to a page number** within the first rows; never with a total count. The same rule holds for `object-read`, `/private/user-read`, `table-column-groupby`, `table-column-distinct`, `/my/message-inbox`, `/my/message-thread`, pgweb's rows and every project list route.
 
 | | |
 |---|---|
@@ -292,6 +295,31 @@ curl -G "$BASE_URL/my/object-read" \
   --data-urlencode 'connection=read'
 ```
 
+### Board: the first page of each value (`group_column`)
+
+```bash
+# A Kanban board: the first 20 tasks of each status, in one call
+curl -G "$BASE_URL/private/object-read" \
+  -H "Authorization: Bearer $TOKEN" \
+  --data-urlencode 'table=task' \
+  --data-urlencode 'group_column=status' \
+  --data-urlencode 'group_values=[1,2,3,4,5]' \
+  --data-urlencode 'filter=["priority >= 2"]' \
+  --data-urlencode 'order=id desc' \
+  --data-urlencode 'limit=20'
+
+# Load more in status 2: a plain read with that value's filter and its after
+curl -G "$BASE_URL/private/object-read" \
+  -H "Authorization: Bearer $TOKEN" \
+  --data-urlencode 'table=task' \
+  --data-urlencode 'filter=["priority >= 2", "status = 2"]' \
+  --data-urlencode 'order=id desc' \
+  --data-urlencode 'limit=20' \
+  --data-urlencode 'after=<groups.2.after>'
+```
+
+Returns `{"groups": {"1": {"obj_list": [...], "after": "..."}, "2": {...}, ...}}`, one key per value in the order sent, empty values included. The same works on `/my`, `/public` and `/admin` object-read. Other uses: latest rows per user (`assigned_to_id`), per country, per category, per chat.
+
 ### CSV export (`GET /*/object-read-export`)
 
 Each object-read route has a CSV export with the same access and rules, downloaded as `<table>.csv`:
@@ -342,6 +370,23 @@ curl -G "$BASE_URL/admin/table-column-groupby" \
 ```
 
 Distinct returns `{"item_list", "after"}`, group-by `{"obj_list", "after"}`; the next page sends that `after` ([Paging](#paging)). Both accept optional `connection` and `filter`. Distinct takes a string `col`; group-by takes a JSON list `col` and supports `agg=count|sum|avg|min|max`. For a numeric sum, use `agg=sum&agg_col=priority&order=sum desc`.
+
+
+### Which route for which screen
+
+Use these before writing a project route; most screens need nothing else.
+
+| Screen | Route | Key params |
+|---|---|---|
+| A list or table, filtered, sorted, paged | `object-read` | `table`, `filter`, `order`, `column`, `limit`, `after` |
+| A board, or the latest rows per person, country or category | `object-read` | `group_column`, `group_values` |
+| Counts or totals per value (dashboard cards, charts, calendar) | `table-column-groupby` | `col` (one or more columns), `agg`, `filter` |
+| The values of a dropdown | `table-column-distinct` | `col`, `filter`, `limit`, `after` |
+| CSV download of a list | `object-read-export` | the same as the list |
+| Users of the app (user management) | `/private/user-read` | `filter`, `limit`, `after`; columns from `config_column_users_private_read` |
+| Create, change, delete rows | `object-create`, `object-update`, `object-delete` | with `config_api` checks (role, permission) |
+
+Pick the tier by who reads: `/my` (own rows), `/private` (any logged-in user, tables in `config_table_private_read_allowed`), `/public` (no login), `/admin` (role 1). Hide columns with `config_column_read_blocked`. Write a project route only for joins, several different lists in one statement, computed filters or business checks.
 
 ---
 

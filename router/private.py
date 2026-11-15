@@ -30,9 +30,9 @@ async def func_api_private_blob_upload_presigned(*, request: Request):
 @router.get("/private/object-read")
 async def func_api_private_object_read(*, request: Request):
     app_state = request.app.state
-    oq = await app_state.func_request_param_read(request=request, mode="query", param_specs=[{"name": "table", "type": "str", "required": True}, {"name": "limit", "type": "int", "default": app_state.config_sql_read_limit_default}, {"name": "after", "type": "str"}, {"name": "page", "type": "int", "minimum": 1}, {"name": "order", "type": "str", "default": "id desc"}, {"name": "column", "type": "str", "default": "*"}, {"name": "relation", "type": "list", "default": []}, {"name": "filter", "type": "list", "default": []}])
+    oq = await app_state.func_request_param_read(request=request, mode="query", param_specs=[{"name": "table", "type": "str", "required": True}, {"name": "limit", "type": "int", "default": app_state.config_sql_read_limit_default}, {"name": "after", "type": "str"}, {"name": "page", "type": "int", "minimum": 1}, {"name": "order", "type": "str", "default": "id desc"}, {"name": "column", "type": "str", "default": "*"}, {"name": "relation", "type": "list", "default": []}, {"name": "filter", "type": "list", "default": []}, {"name": "group_column", "type": "str"}, {"name": "group_values", "type": "list"}])
     app_state.func_check_table_permission(app_state=app_state, table=oq["table"], relation=oq["relation"], scope="private", action="read")
-    res = await app_state.func_postgres_read(config_page_offset_max=app_state.config_page_offset_max, client_postgres=request.state.client_postgres, client_password_hasher=app_state.client_password_hasher, cache_postgres_schema=request.state.cache_postgres_schema, config_sql_read_limit_max=app_state.config_sql_read_limit_max, config_sql_read_relation_fetch_limit_max=app_state.config_sql_read_relation_fetch_limit_max, table=oq["table"], filter=oq["filter"], limit=oq["limit"], order=oq["order"], column=oq["column"], relation=oq["relation"], config_column_read_blocked=app_state.config_column_read_blocked, after=oq.get("after"), page=oq.get("page"))
+    res = await app_state.func_postgres_read(config_page_offset_max=app_state.config_page_offset_max, client_postgres=request.state.client_postgres, client_password_hasher=app_state.client_password_hasher, cache_postgres_schema=request.state.cache_postgres_schema, config_sql_read_limit_max=app_state.config_sql_read_limit_max, config_sql_read_relation_fetch_limit_max=app_state.config_sql_read_relation_fetch_limit_max, table=oq["table"], filter=oq["filter"], limit=oq["limit"], order=oq["order"], column=oq["column"], relation=oq["relation"], config_column_read_blocked=app_state.config_column_read_blocked, after=oq.get("after"), page=oq.get("page"), group_column=oq.get("group_column"), group_values=oq.get("group_values"))
     return {"status": 1, "message": res}
 
 @router.get("/private/object-read-export")
@@ -43,12 +43,13 @@ async def func_api_private_object_read_export(*, request: Request):
     generator = await app_state.func_postgres_read_export(client_postgres=request.state.client_postgres, client_password_hasher=app_state.client_password_hasher, cache_postgres_schema=request.state.cache_postgres_schema, config_export_limit=app_state.config_export_limit, table=oq["table"], filter=oq["filter"], order=oq["order"], column=oq["column"], config_column_read_blocked=app_state.config_column_read_blocked, limit=oq.get("limit"))
     return app_state.func_csv_response(content=generator, filename=f'{oq["table"]}.csv')
 
-@router.get("/private/users-list")
-async def func_api_private_users_list(*, request: Request):
+@router.get("/private/user-read")
+async def func_api_private_user_read(*, request: Request):
     app_state = request.app.state
-    oq = await app_state.func_request_param_read(request=request, mode="query", param_specs=[{"name": "limit", "type": "int", "default": app_state.config_sql_read_limit_default}, {"name": "after", "type": "str"}, {"name": "page", "type": "int", "minimum": 1}, {"name": "role", "type": "int"}])
-    filters = [f"role = {oq['role']}"] if oq.get("role") is not None else []
-    res = await app_state.func_postgres_read(config_page_offset_max=app_state.config_page_offset_max, client_postgres=request.state.client_postgres, client_password_hasher=app_state.client_password_hasher, cache_postgres_schema=request.state.cache_postgres_schema, config_sql_read_limit_max=app_state.config_sql_read_limit_max, config_sql_read_relation_fetch_limit_max=app_state.config_sql_read_relation_fetch_limit_max, table="users", filter=filters, limit=oq["limit"], after=oq.get("after"), page=oq.get("page"), order="username asc", column="id,username", relation=[], config_column_read_blocked=app_state.config_column_read_blocked)
+    oq = await app_state.func_request_param_read(request=request, mode="query", param_specs=[{"name": "limit", "type": "int", "default": app_state.config_sql_read_limit_default}, {"name": "after", "type": "str"}, {"name": "page", "type": "int", "minimum": 1}, {"name": "order", "type": "str", "default": "id desc"}, {"name": "filter", "type": "list", "default": []}], reject_unknown=True)
+    allowed = app_state.config_column_users_private_read
+    blocked = [column for column in request.state.cache_postgres_schema.get("users", {}) if column not in allowed]
+    res = await app_state.func_postgres_read(config_page_offset_max=app_state.config_page_offset_max, client_postgres=request.state.client_postgres, client_password_hasher=app_state.client_password_hasher, cache_postgres_schema=request.state.cache_postgres_schema, config_sql_read_limit_max=app_state.config_sql_read_limit_max, config_sql_read_relation_fetch_limit_max=app_state.config_sql_read_relation_fetch_limit_max, table="users", filter=oq["filter"], limit=oq["limit"], after=oq.get("after"), page=oq.get("page"), order=oq["order"], column=",".join(allowed), relation=[], config_column_read_blocked=[*blocked, "password"])
     return {"status": 1, "message": res}
 
 @router.get("/private/table-column-groupby")

@@ -177,6 +177,7 @@ config_column_single_update = ["username", "password", "email", "mobile"]
 config_column_users_blocked = ["created_at", "created_by_id", "updated_at", "updated_by_id", "deleted_at", "deleted_by_id", "is_protected", "last_active_at"]
 config_column_users_my_blocked = ["role", "permissions", "verified_at", "verified_by_id", "deactivated_at", "deactivated_by_id", "parent_id", "source", "id_ext", "google_login_id", "google_login_metadata"]
 config_column_read_blocked = ["password"]
+config_column_users_private_read = ["id", "username", "role", "created_at", "deactivated_at"]
 
 # dict
 config_column_regex = {
@@ -447,15 +448,6 @@ config_api = {
 "/my/blob-preview-urls": {"id": 65, "is_token": True},
 "/my/blob-delete-all": {"id": 59, "is_token": True},
 "/my/blob-delete-url": {"id": 60, "is_token": True},
-# private
-"/private/send-email": {"id": 61, "is_token": True},
-"/private/blob-upload-file": {"id": 62, "is_token": True},
-"/private/blob-upload-presigned": {"id": 63, "is_token": True},
-"/private/object-read": {"id": 102, "is_token": True, "is_connection_param": True},
-"/private/object-read-export": {"id": 125, "is_token": True, "is_connection_param": True},
-"/private/users-list": {"id": 112, "is_token": True, "is_connection_param": True},
-"/private/table-column-groupby": {"id": 107, "is_token": True, "cache": {"mode": "inmemory", "ttl_sec": 10, "is_per_user": False}, "is_connection_param": True},
-"/private/table-column-distinct": {"id": 108, "is_token": True, "cache": {"mode": "inmemory", "ttl_sec": 10, "is_per_user": False}, "is_connection_param": True},
 # public
 "/public/object-create": {"id": 66, "is_token": False},
 "/public/object-read-export": {"id": 124, "is_token": False, "is_connection_param": True},
@@ -470,6 +462,15 @@ config_api = {
 "/public/blob-upload-file": {"id": 97, "is_active": False, "is_token": False},
 "/public/blob-upload-presigned": {"id": 98, "is_active": False, "is_token": False},
 "/public/password-hash": {"id": 100, "is_token": False, "rate_limit": {"mode": "inmemory", "limit": 5, "window_sec": 60}},
+# private
+"/private/send-email": {"id": 61, "is_token": True},
+"/private/blob-upload-file": {"id": 62, "is_token": True},
+"/private/blob-upload-presigned": {"id": 63, "is_token": True},
+"/private/object-read": {"id": 102, "is_token": True, "is_connection_param": True},
+"/private/object-read-export": {"id": 125, "is_token": True, "is_connection_param": True},
+"/private/user-read": {"id": 112, "is_token": True, "is_connection_param": True},
+"/private/table-column-groupby": {"id": 107, "is_token": True, "cache": {"mode": "inmemory", "ttl_sec": 10, "is_per_user": False}, "is_connection_param": True},
+"/private/table-column-distinct": {"id": 108, "is_token": True, "cache": {"mode": "inmemory", "ttl_sec": 10, "is_per_user": False}, "is_connection_param": True},
 # admin
 "/admin/sync": {"id": 1, "is_token": True, "user_check_role": {"mode": "realtime", "roles": [1]}},
 "/admin/monitor": {"id": 128, "is_token": True, "user_check_role": {"mode": "token", "roles": [1]}, "is_log_api": False, "is_connection_param": True},
@@ -479,7 +480,7 @@ config_api = {
 "/admin/object-read-export": {"id": 126, "is_token": True, "user_check_role": {"mode": "token", "roles": [1]}, "is_connection_param": True},
 "/admin/user-create": {"id": 130, "is_token": True, "user_check_role": {"mode": "realtime", "roles": [1]}},
 "/admin/user-update": {"id": 131, "is_token": True, "user_check_role": {"mode": "realtime", "roles": [1]}},
-"/admin/user-delete": {"id": 132, "is_token": True, "user_check_permission": {"mode": "token"}, "rate_limit": {"mode": "inmemory", "limit": 10, "window_sec": 60}},
+"/admin/user-delete": {"id": 132, "is_token": True, "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_permission": {"mode": "token"}, "rate_limit": {"mode": "inmemory", "limit": 10, "window_sec": 60}},
 "/admin/object-delete": {"id": 5, "is_token": True, "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "user_check_deleted": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 10, "window_sec": 60}},
 "/admin/table-column-groupby": {"id": 104, "is_token": True, "user_check_role": {"mode": "token", "roles": [1]}, "cache": {"mode": "inmemory", "ttl_sec": 10, "is_per_user": False}, "is_connection_param": True},
 "/admin/table-column-distinct": {"id": 106, "is_token": True, "user_check_role": {"mode": "token", "roles": [1]}, "cache": {"mode": "inmemory", "ttl_sec": 10, "is_per_user": False}, "is_connection_param": True},
