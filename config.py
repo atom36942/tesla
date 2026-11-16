@@ -166,7 +166,11 @@ config_table_public_create_allowed = ["test"]
 config_table_public_read_allowed = ["test"]
 config_mongodb_my_create_allowed = {"test": ["post"]}
 config_table_private_read_allowed = ["test"]
-config_table_permission_write_allowed = []
+
+# permission
+config_permission_table_write_allowed = []
+config_permission_user_roles = []
+config_permission_user_column_blocked = ["role", "permissions", "username", "email", "mobile", "verified_at", "verified_by_id", "deactivated_by_id", "parent_id", "source", "id_ext", "google_login_id", "google_login_metadata"]
 
 # column
 config_column_token_encode = ["id", "role", "username", "id_ext" ,"deactivated_at", "deleted_at", "permissions"]
@@ -198,7 +202,7 @@ config_options = {
 config_column_int_mapping = {
 "users": {
 "role": {1: "Admin"},
-"permissions": {6: "Postgres query runner write", 136: "Update any row", 137: "Delete any row"},
+"permissions": {6: "Postgres query runner write", 136: "Update any row", 137: "Delete any row", 138: "Create user", 139: "Update user"},
 },
 "blob": {
 "type": {1: "File", 2: "Presigned Url"},
@@ -475,6 +479,8 @@ config_api = {
 # permission
 "/permission/object-update": {"id": 136, "is_token": True, "user_check_permission": {"mode": "token"}},
 "/permission/object-delete": {"id": 137, "is_token": True, "user_check_permission": {"mode": "token"}, "rate_limit": {"mode": "inmemory", "limit": 10, "window_sec": 60}},
+"/permission/user-create": {"id": 138, "is_token": True, "user_check_permission": {"mode": "token"}, "rate_limit": {"mode": "inmemory", "limit": 10, "window_sec": 60}},
+"/permission/user-update": {"id": 139, "is_token": True, "user_check_permission": {"mode": "token"}, "rate_limit": {"mode": "inmemory", "limit": 10, "window_sec": 60}},
 # admin
 "/admin/sync": {"id": 1, "is_token": True, "user_check_role": {"mode": "realtime", "roles": [1]}},
 "/admin/monitor": {"id": 128, "is_token": True, "user_check_role": {"mode": "token", "roles": [1]}, "is_log_api": False, "is_connection_param": True},

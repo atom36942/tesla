@@ -58,6 +58,22 @@ Atom's version is `ATOM_VERSION` in `sync.py` (for example `ATOM_VERSION = "1.2.
 
 Versions follow semver: major (`2.0.0`) when projects must change their code, minor (`1.1.0`) for new features, patch (`1.0.1`) for fixes. Sync always takes the latest `main`; to mark a new version, raise `ATOM_VERSION` and the `Version` line at the top of `readme.md` (a test checks they match) and push to `main` (no tags or GitHub releases). Commits in between keep the last version. A project synced before versions existed shows `unknown` until its next sync. If a sync fails after installing the new `sync.py`, that file already shows the new version while the other files may be older; the error says so, and running sync again finishes it.
 
+### Upgrading to 15.0.0
+
+The `/permission` route settings are together in one `# permission` section, all named `config_permission_*`: rename `config_table_permission_write_allowed` to `config_permission_table_write_allowed` and `config_column_users_permission_blocked` to `config_permission_user_column_blocked` in `config_extend.py` (startup names the new key if an old one is still set). `config_permission_user_roles` keeps its name.
+
+### 14.3.0
+
+`PUT /permission/user-update` takes any `users` column except those in the new `config_column_users_permission_blocked` (`role`, `permissions`, `username`, `email`, `mobile`, ...; startup refuses a list without `role` and `permissions`), several at once, for an app's Edit profile; `password` still goes alone. Nothing to change in projects.
+
+### Upgrading to 14.0.0
+
+`config_permission_user_create_roles` is now `config_permission_user_roles` (startup names the new key if the old one is still set): rename it in `config_extend.py`. The same list now also limits the new `PUT /permission/user-update` (permission 139): `{id, name}`, `{id, password}` or `{id, deactivated_at}` (a timestamp blocks, `null` restores), only for users whose role is in the list. Nobody holds 139 by default. To make a block take effect at once instead of at the user's next token renewal, set `config_api_global_user_check_deactivated = "realtime"`.
+
+### 13.2.0
+
+`POST /permission/user-create` (permission 138): `{username, password, role}`, for an app's own user management. Off twice by default: nobody holds 138, and `config_permission_user_create_roles` (now `config_permission_user_roles`) is `[]`; set the roles it may create in `config_extend.py` (from 2; startup refuses 1).
+
 ### Upgrading to 13.0.0
 
 A new route group, `/permission/*` (`router/permission.py`, between private and admin): token plus a permission, any role. `/private/object-update` and `/private/object-delete` are now `/permission/object-update` and `/permission/object-delete` (same ids 136, 137, so granted users keep them), and `config_table_private_write_allowed` is `config_table_permission_write_allowed`: rename both in `config_extend.py` and in the page. Startup now refuses a `/permission/*` route without `user_check_permission`, and a route with a role, permission, deactivated or deleted check whose `is_token` is not `True`. Root gets every `/admin` permission route at startup, a project's too.

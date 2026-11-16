@@ -27,7 +27,8 @@ def func_check_table_permission(*, app_state: State, table: str, relation: list 
     """Validate if table and relation access is allowed for given scope ('public', 'private', 'my') and action ('read', 'create', 'delete_all')."""
     verb_map = {"create": "creation", "read": "read", "delete_all": "delete all"}
     verb = verb_map.get(action, action.replace("_", " "))
-    blocked_attr = f"config_table_{scope}_{action}_blocked"
+    prefix = "config_permission_table" if scope == "permission" else f"config_table_{scope}"    # the /permission settings live together under config_permission_
+    blocked_attr = f"{prefix}_{action}_blocked"
     blocked_tables = getattr(app_state, blocked_attr, None)
     if blocked_tables is not None:
         if "*" in blocked_tables or table in blocked_tables:
@@ -38,7 +39,7 @@ def func_check_table_permission(*, app_state: State, table: str, relation: list 
                 if len(parts) >= 2 and ("*" in blocked_tables or parts[1] in blocked_tables):
                     raise Exception(f"relation read disabled for table: {parts[1]}")
         return
-    config_attr = f"config_table_{scope}_{action}_allowed"
+    config_attr = f"{prefix}_{action}_allowed"
     enabled_tables = getattr(app_state, config_attr, []) or []
     if "*" not in enabled_tables and table not in enabled_tables:
         raise Exception(f"{verb} disabled for table: {table}")
@@ -66,9 +67,14 @@ def func_check_table_write_blocked(*, app_state: State, table: str) -> None:
     """Refuse a table in config_table_write_blocked (tables only Atom writes, such as logs) in every generic write API, admin's included: 403."""
     if table in (getattr(app_state, "config_table_write_blocked", None) or []): raise func_api_error(message=f"write disabled for table: {table}", status_code=403)
 
-def func_check_table_not_users(*, table: str, api: str) -> None:
-    """Refuse the users table in a generic object API: users rows are written only through their own APIs (/my/user-*, /admin/user-*)."""
-    if table == "users": raise Exception(f"users table: use {api}")
+def func_check_table_not_users(*, table: str) -> None:
+    """Refuse the users table in a generic object API: users rows are written only through their own APIs (/my/user-*, /permission/user-*, /admin/user-*)."""
+    if table == "users": raise Exception("write disabled for table: users")
+
+def func_check_permission_user_role(*, app_state: State, role: int) -> None:
+    """Refuse a role outside config_permission_user_roles in a /permission user route: the role a new user gets, or the role of the user being changed; never role 1."""
+    allowed = getattr(app_state, "config_permission_user_roles", None) or []
+    if role == 1 or role not in allowed: raise func_api_error(message=f"role {role} not allowed (config_permission_user_roles: {allowed})", status_code=400)
 
 def func_check_batch_limit(*, app_state: State, items: list) -> None:
     """Ensure batch item list length does not exceed config_batch_item_limit."""

@@ -1,9 +1,11 @@
 <!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1"/>
 <title>PgWeb</title>
+<script>/* apply the saved theme (pgweb.theme) before paint; light by default */
+try{if(JSON.parse(localStorage.getItem('pgweb')||'{}').theme==='dark')document.documentElement.dataset.theme='dark'}catch{}</script>
 <style>
 /* ==== palette and theme ==== */
 /* palette from pgweb's own app.css: #79589f chrome, #7eb54e primary, #f9f9f9 sidebar,
@@ -174,6 +176,7 @@ body.more-open .tab.on{background:transparent;color:var(--nav-fg)}    /* only on
 #tabs .headicon svg{display:block;width:17px;height:17px;margin:auto;fill:none;
   stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 #tabs #readonly.off{color:#ffd0cc}
+#tabs #theme{align-self:center}
 #tabs #connbtn{align-self:center;height:26px;line-height:24px;padding:0 12px;margin:0 0 0 10px;
   font-size:12px;font-weight:500;border-radius:3px;border:1px solid rgba(255,255,255,.5);
   background:transparent;color:#fff;cursor:pointer;white-space:nowrap;flex:none}
@@ -579,6 +582,7 @@ dialog.structured .bd{padding:0;overflow:hidden;background:var(--side)}
         <div class="tab" data-v="info" hidden>Database info</div>
       </div>
       <div id="optionswrap">
+        <button class="headicon" id="theme" title="Use dark theme" aria-label="Use dark theme"></button>
         <button class="headicon on conn-only" id="readonly" title="Read only: On" aria-label="Read only: On" hidden></button>
         <button class="headicon conn-only" id="dbinfo" title="Database info" aria-label="Database info" hidden></button>
         <button class="headicon conn-only" id="reload" title="Refresh schema" aria-label="Refresh schema" hidden></button>
@@ -828,6 +832,13 @@ const S = { db:'', table:'', kind:'', pk:null, cols:[], widths:[], total:0,
             sideItems:[], sideShown:0, queryCleared:false,
             filterApplied:{col:'',op:'=',val:''}, dbInfo:null, dbCatalog:{}, dbCatalogKind:'' };
 let pool=[], lastFirst=-1, ticking=false;
+let lastC0=-1, lastC1=-1;    // the columns the row pool holds values for (all of them, unless the table is wide)
+const WIDE_COLS=40;    // over this many columns, only those in view (and 400px either side) get values as the grid scrolls
+let rowsSeq=0;
+// rows of a table page that hold a preview of a very large value (the server sends one over 16 KB); fullRow reads the whole row before anything uses its values
+const cutRows=new WeakSet();
+const markCut=page=>{ for(const [r] of page.cut||[]) if(page.rows[r]) cutRows.add(page.rows[r]); };    // each rows request (open, filter, page, refresh) takes the next number; a response that is no longer the latest is dropped
+const drawStObj=name=>$('st-obj').replaceChildren(el('b',null,name));    // a table name is text, never HTML
 let toastTimer;
 
 function toast(message){
@@ -883,6 +894,24 @@ async function api(body){
   return j.message;
 }
 
+/* ==== theme ==== */
+(function theme(){
+  document.documentElement.dataset.theme = getStored('theme') === 'dark' ? 'dark' : 'light';
+  const draw = () => {
+    const dark = document.documentElement.dataset.theme === 'dark';
+    $('theme').innerHTML = icon(dark ? 'sun' : 'moon');
+    $('theme').title = $('theme').ariaLabel = dark ? 'Use light theme' : 'Use dark theme';
+  };
+  draw();
+  $('theme').onclick = () => {
+    const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+    document.documentElement.dataset.theme = next;
+    setPreference('theme', next);
+    draw();
+    toast(next === 'dark' ? 'Dark theme enabled' : 'Light theme enabled');
+  };
+})();
+
 /* ==== query safety ==== */
 function drawReadOnly(){
   const b=$('readonly');
@@ -933,7 +962,7 @@ function setConnected(on){
   $('dbname').hidden = !on; $('dbname').textContent = where; $('dbname').title = on ? (S.connectionUrl ? shortDsn(S.connectionUrl) : S.db) : '';
   $('connbtn').textContent = 'Disconnect';
   $('connbtn').title = 'Disconnect from this database';
-  for(const el of $('optionswrap').querySelectorAll('.conn-only')) el.hidden = !on;
+  for(const el of $('optionswrap').querySelectorAll('.conn-only')) el.hidden = !on;    // the theme button stays, connected or not
   $('pane').hidden = false;
   $('status').hidden = true;
   $('queryrunner').disabled = !on;
@@ -1392,7 +1421,7 @@ async function openObject(table, kind, initialTab = 'rows', first = null){    /*
     setSideTab(targetKind, true);
   }
   for(const el of document.querySelectorAll('.obj.on')) el.classList.remove('on');
-  const targetObj = document.querySelector(`.obj[data-table="${table}"]`);
+  const targetObj = document.querySelector(`.obj[data-table="${CSS.escape(table)}"]`);
   if(targetObj){
     targetObj.classList.add('on');
     targetObj.scrollIntoView({block:'nearest'});
@@ -1406,10 +1435,18 @@ async function openObject(table, kind, initialTab = 'rows', first = null){    /*
   for(const t of document.querySelectorAll('.tab')) t.hidden = t.dataset.v==='info';
   $('morewrap').hidden=false;
 
-  const m = await (first || api({action:'rows', table, limit:S.pageSize, is_meta:1}));
+  const seq=++rowsSeq;
+  let m;
+  try{ m = await (first || api({action:'rows', table, limit:S.pageSize, is_meta:1})); }
+  catch(err){
+    if(seq!==rowsSeq) return false;
+    if(err.message!=='not_connected'){ alertBox(`Could not open ${table}`, err.message); openRunner(); }
+    return false;
+  }
+  if(seq!==rowsSeq) return false;    // another table was opened meanwhile
   S.meta=m.meta; S.cols=m.meta.columns.map(c=>c.name); S.pk=m.meta.pk; S.latestFirst=!!m.meta.latest_first;
   S.total=m.rows.length; S.after=m.after; S.cursors=[null]; S.pageIndex=0;
-  S.rows=m.rows;
+  S.rows=m.rows; markCut(m);
 
   for(const input of document.querySelectorAll('.detail-search')) input.value='';
   $('fcol').textContent='';
@@ -1419,11 +1456,12 @@ async function openObject(table, kind, initialTab = 'rows', first = null){    /*
   }
   renderFcolPicker(m.meta.columns);
   S.filterApplied={col:$('fcol').value,op:'=',val:''}; drawFilterOps(false); drawFilterActions();
-  $('st-obj').innerHTML = `<b>${table}</b>`;
+  drawStObj(table);
   $('st-rows').textContent = `${m.rows.length} rows loaded`;
   $('st-size').textContent = m.meta.stats.total_size || '';
   drawBatchNav(); buildGrid(); vp.scrollTop=0; render(true);
   show(initialTab || 'rows');
+  return true;
 }
 
 /* per-table detail: one request, only when its tab is first opened */
@@ -1431,10 +1469,12 @@ async function loadDetail(part){
   if(S.loaded[part] || !S.table) return;
   S.loaded[part] = true;
   fillDetailGrid('g-'+part,[], 'Loading…');
+  const table=S.table, loaded=S.loaded;
   try{
-    const m = await api({action:'detail', table:S.table, part});
+    const m = await api({action:'detail', table, part});
+    if(S.table!==table || S.loaded!==loaded) return;    // another table (or a refresh) since: its own request fills the tab
     fillDetailGrid('g-'+part,DETAIL_ROWS[part](m.rows),`No ${part}`);
-  }catch(err){ S.loaded[part]=false; fillDetailGrid('g-'+part,[], 'Error: '+err.message); }
+  }catch(err){ if(S.table!==table || S.loaded!==loaded) return; S.loaded[part]=false; fillDetailGrid('g-'+part,[], 'Error: '+err.message); }
 }
 
 /* ==== grid ==== */
@@ -1480,7 +1520,7 @@ function buildGrid(){
     headEl.appendChild(th);
   });
   const need = Math.ceil(vp.clientHeight/ROW_H) + OVER*2;
-  rowsEl.textContent=''; pool=[];
+  rowsEl.textContent=''; pool=[]; lastC0=lastC1=-1;
   const frag=document.createDocumentFragment();
   for(let i=0;i<need;i++){
     const tr=el('div','tr');
@@ -1493,6 +1533,19 @@ function buildGrid(){
   rowsEl.appendChild(frag);
   $('empty').textContent = 'No rows';
   $('empty').classList.toggle('on', S.total===0);
+}
+async function fullRow(index){
+  const row=rowAt(index);
+  if(!row || S.local || !cutRows.has(row)) return row;
+  const table=S.table, seq=rowsSeq;
+  const m=await api({action:'row', table, pk:S.pk, pk_value:row[S.cols.indexOf(S.pk)]});
+  if(seq!==rowsSeq || S.table!==table || S.rows[index]!==row) return null;    // another page or table since
+  if(!m.rows.length) throw new Error('row not found: it was deleted or its key changed; reload the rows');
+  const full=S.cols.map(name=>m.rows[0][m.cols.indexOf(name)]);
+  S.rows[index]=full;
+  if(RP.row===row) RP.row=full;
+  lastFirst=-1; render(true);
+  return full;
 }
 function rowAt(i){
   return (S.local || S.rows)[i] ?? null;
@@ -1519,13 +1572,15 @@ async function changeBatch(direction){
   const index=forward?S.pageIndex+1:S.pageIndex-1;
   if(forward) S.cursors[index]=S.after;
   $('prevbatch').disabled=$('nextbatch').disabled=true;
+  const seq=++rowsSeq;
   try{
     const page=await api({action:'rows',table:S.table,pk:S.pk,limit:S.pageSize,is_desc:S.latestFirst?1:0,
                           ...(S.cursors[index]?{after:S.cursors[index]}:{}),...filterParams()});
+    if(seq!==rowsSeq) return;
     S.pageIndex=index; S.cursors.length=index+1;
-    S.rows=page.rows; S.total=page.rows.length; S.after=page.after; drawSlowFilterHint(page.ms);
+    S.rows=page.rows; markCut(page); S.total=page.rows.length; S.after=page.after; drawSlowFilterHint(page.ms);
     drawBatchNav(); buildGrid(); vp.scrollTop=0; lastFirst=-1; render(true);
-  }catch(err){ drawBatchNav(); alertBox('Batch navigation failed',err.message); }
+  }catch(err){ if(seq!==rowsSeq) return; drawBatchNav(); alertBox('Batch navigation failed',err.message); }
 }
 $('prevbatch').onclick=()=>changeBatch('previous');
 // rows per page: 100 for every table; a change applies to the open table only and reloads its first page with the same filter
@@ -1533,6 +1588,20 @@ for(const size of PAGE_SIZES){ const o=el('option'); o.value=size; o.textContent
 $('pagesize').value=S.pageSize;
 $('pagesize').onchange=()=>{ S.pageSize=+$('pagesize').value; if(S.table) applyFilter(); };
 $('nextbatch').onclick=()=>changeBatch('next');
+function visibleColumns(){
+  const n=S.cols.length;
+  if(n<=WIDE_COLS) return [0,n-1];
+  const left=vp.scrollLeft-400, right=vp.scrollLeft+vp.clientWidth+400;
+  let x=0, c0=-1, c1=n-1;
+  for(let c=0;c<n;c++){
+    const w=S.widths[c]||0;
+    if(c0<0 && x+w>=left) c0=c;
+    if(x>right){ c1=c-1; break; }
+    x+=w;
+  }
+  c0=Math.max(0,c0);
+  return [c0, Math.max(c0,c1)];
+}
 function render(force){
   // the panel's row was replaced (another table, a filter, a refresh): its data is gone, so close it
   if(RP.index>=0 && (RP.table!==S.table || (rowAt(RP.index) && rowAt(RP.index)!==RP.row) || RP.index>=S.total)) rowPanelClose();
@@ -1541,8 +1610,10 @@ function render(force){
   // block to the viewport, since one pixel now covers several rows.
   let first = scaled ? Math.round(top * S.scale / ROW_H) : Math.floor(top/ROW_H) - OVER;
   first = Math.max(0, Math.min(first, Math.max(0, S.total - pool.length)));
-  if(!force && first===lastFirst) return;
+  const [c0,c1]=visibleColumns(), colsMoved=c0!==lastC0||c1!==lastC1;
+  if(!force && first===lastFirst && !colsMoved) return;
   lastFirst = first;
+  const prevC0=lastC0, prevC1=lastC1; lastC0=c0; lastC1=c1;
   rowsEl.style.transform = `translateY(${scaled ? top : first*ROW_H}px)`;
   for(let p=0;p<pool.length;p++){
     const idx=first+p, tr=pool[p];
@@ -1550,7 +1621,9 @@ function render(force){
     tr.hidden=false; tr.dataset.i=idx;
     const row=rowAt(idx), cells=tr.children;
     tr.classList.toggle('rp-sel', idx===RP.index);
-    for(let c=0;c<cells.length;c++){
+    // columns scrolled out of view are emptied, so find-in-page never matches another row's value
+    if(prevC0>=0) for(let c=prevC0;c<=Math.min(prevC1,cells.length-1);c++) if(c<c0||c>c1){ cells[c].textContent=''; cells[c].className='td'; }
+    for(let c=c0;c<=Math.min(c1,cells.length-1);c++){
       const td=cells[c];
       if(!row){ td.textContent=''; td.className='td'; continue; }
       const v=row[c];
@@ -1585,6 +1658,7 @@ addEventListener('mousemove', e=>{
   for(const tr of pool) tr.children[drag.i].style.width=w+'px';
   const gridWidth=S.widths.reduce((a,b)=>a+b,0);
   inner.style.width=gridWidth+'px'; inner.style.paddingRight=gridWidth>vp.clientWidth?'16px':'0';
+  render(false);
 });
 addEventListener('mouseup', ()=>{
   if(!drag) return;
@@ -1615,8 +1689,8 @@ function openCellValue(column,rawValue,copiedMessage='Cell value copied'){
 $('dlg').addEventListener('close',()=>$('dlg').classList.remove('structured'));
 rowsEl.addEventListener('dblclick', e=>{
   const td=e.target.closest('.td'); if(!td) return;
-  const row=rowAt(+td.parentElement.dataset.i); if(!row) return;
-  const c=+td.dataset.c; openCellValue(S.cols[c],row[c]);
+  const c=+td.dataset.c;
+  fullRow(+td.parentElement.dataset.i).then(row=>{ if(row) openCellValue(S.cols[c],row[c]); }).catch(err=>alertBox('Could not read the row',err.message));
 });
 
 /* ==== edit a cell ==== */
@@ -1624,6 +1698,7 @@ rowsEl.addEventListener('dblclick', e=>{
 function cellEditBlock(colIndex,row){
   if(S.local||S.kind!=='table'||!S.meta) return 'Only rows of a table can be edited';
   if(S.readOnly) return 'Read-only mode is on';
+  if(cutRows.has(row)) return 'Loading the whole row…';
   if(!S.pk) return 'Editing needs a single-column primary key; use the SQL runner';
   const meta=S.meta.columns.find(col=>col.name===S.cols[colIndex]);
   if(!meta) return 'Unknown column';
@@ -1685,7 +1760,8 @@ function rowPanelOpen(index){
   }
   lastFirst=-1; render(true);
   rowPanelDraw();
-  if(isNew) $('rp-body').scrollTop=0;    // a fresh panel starts at the first field; moving between rows keeps the place
+  if(isNew) $('rp-body').scrollTop=0;
+  if(cutRows.has(row)) fullRow(index).then(full=>{ if(full && RP.index===index) rowPanelDraw(); }).catch(err=>{ if(RP.index===index) alertBox('Could not read the row',err.message); });    // a fresh panel starts at the first field; moving between rows keeps the place
 }
 function rowPanelClose(){
   if(RP.index<0) return;
@@ -1697,6 +1773,7 @@ function rowPanelClose(){
 function rowDeleteBlock(row){
   if(S.local||S.kind!=='table') return 'Only rows of a table can be deleted';
   if(S.readOnly) return 'Read-only mode is on';
+  if(cutRows.has(row)) return 'Loading the whole row…';
   if(!S.pk) return 'Deleting needs a single-column primary key; use the SQL runner';
   const key=row[S.cols.indexOf(S.pk)];
   if(typeof key==='number'&&!Number.isSafeInteger(key)) return "This row's key is too large for the browser to send exactly; use the SQL runner";
@@ -1982,15 +2059,17 @@ function drawSlowFilterHint(ms){
 }
 async function applyFilter(){
   S.rows=[]; lastFirst=-1;
+  const seq=++rowsSeq;
   try{
     const first = await api({action:'rows', table:S.table, pk:S.pk,
                              is_desc:S.latestFirst?1:0,limit:S.pageSize, ...filterParams()});
-    S.rows=first.rows;
+    if(seq!==rowsSeq) return false;
+    S.rows=first.rows; markCut(first);
     S.total=first.rows.length; S.after=first.after; S.cursors=[null]; S.pageIndex=0;
     drawSlowFilterHint(first.ms);
     drawBatchNav(); buildGrid(); vp.scrollTop=0; render(true);
     return true;
-  }catch(err){ alertBox('Filter failed', err.message); return false; }
+  }catch(err){ if(seq!==rowsSeq) return false; alertBox('Filter failed', err.message); return false; }
 }
 $('fval').onkeydown = e => { if(e.key==='Enter') $('fgo').click(); };
 
@@ -2020,14 +2099,16 @@ async function refreshTableData(){
   if(!S.table) return;
   const btn=$('rowrefresh');
   if(btn) btn.disabled=true;
+  const seq=++rowsSeq;
   try{
     const m = await api({action:'rows', table:S.table, pk:S.pk,
                          is_desc:S.latestFirst?1:0, limit:S.pageSize, is_meta:1, ...filterParams()});
+    if(seq!==rowsSeq) return;
     S.meta=m.meta; S.cols=m.meta.columns.map(c=>c.name); S.pk=m.meta.pk; S.latestFirst=!!m.meta.latest_first;
     S.rows=[]; lastFirst=-1;
-    S.rows=m.rows;
+    S.rows=m.rows; markCut(m);
     S.total=m.rows.length; S.after=m.after; S.cursors=[null]; S.pageIndex=0; drawSlowFilterHint(m.ms);
-    $('st-obj').innerHTML = `<b>${S.table}</b>`;
+    drawStObj(S.table);
     $('st-rows').textContent = `${m.rows.length} rows loaded`;
     $('st-size').textContent = m.meta?.stats?.total_size || '';
     drawBatchNav(); buildGrid(); vp.scrollTop=0; render(true);
@@ -2041,14 +2122,18 @@ async function refreshTableData(){
     }
     toast('Table data refreshed');
   }catch(err){
-    alertBox('Refresh failed', err.message);
+    if(seq===rowsSeq) alertBox('Refresh failed', err.message);
   }finally{
     if(btn) btn.disabled=false;
   }
 }
 function safeFilePart(value){return String(value||'table').replace(/[^a-z0-9_.-]+/gi,'-').replace(/^-|-$/g,'');}
 $('rowrefresh').onclick=refreshTableData;
-$('rowcsv').onclick=()=>downloadCsv(S.cols,S.local||S.rows,`${safeFilePart(S.table)}-rows.csv`);
+$('rowcsv').onclick=async()=>{
+  try{ if(!S.local) for(let i=0;i<S.rows.length;i++) if(cutRows.has(S.rows[i])) await fullRow(i); }    // rows holding a preview: their whole values first
+  catch(err){ alertBox('CSV failed',err.message); return; }
+  downloadCsv(S.cols,S.local||S.rows,`${safeFilePart(S.table)}-rows.csv`);
+};
 for(const button of document.querySelectorAll('.detail-download')) button.onclick=()=>{
   const table=$(button.dataset.grid), headers=[...table.tHead.rows[0].cells].map(cell=>cell.textContent);
   const data=[...table.tBodies[0].rows].filter(row=>!row.hidden&&detailRowValues.has(row)).map(row=>detailRowValues.get(row));
@@ -2366,7 +2451,7 @@ function show(v){
   if(v==='rows'){
     $('tools').style.display = S.local ? 'none' : 'flex';
     if(S.cols.length){ lastFirst=-1; render(true); }
-    if(S.table) $('st-obj').innerHTML = `<b>${S.table}</b>`;
+    if(S.table) drawStObj(S.table);
   }
   if(v==='struct' && S.meta?.columns && !S.loaded['struct']){
     S.loaded['struct'] = true;
@@ -2594,10 +2679,7 @@ async function restorePage(saved, first){
     const exists = (S.tree.public || {})[kind]?.some(o => o.name === saved.table) ||
                    (S.sideItems || []).includes(saved.table);
     if(exists){
-      try{
-        await openObject(saved.table, kind, saved.view || 'rows', first);
-        return;
-      }catch{}
+      if(await openObject(saved.table, kind, saved.view || 'rows', first)) return;
     }
   }
   openRunner();
