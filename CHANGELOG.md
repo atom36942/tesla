@@ -4,6 +4,27 @@ Every Atom release with notes, newest first. Versions follow [semver](https://se
 
 Pin or roll back a project to a version: `python3 sync.py --ref v15.6.1` ([docs/sync.md](docs/sync.md)).
 
+## [16.0.0] - 2026-11-18
+
+**Upgrade (projects must change):** `config_api` ids are renumbered 1, 2, 3, … in route order (a project's own routes stay at 200 and up). The permission routes are now `/permission/object-update` 59, `/permission/object-delete` 60, `/permission/user-create` 61, `/permission/user-update` 62, and the Postgres query runner write 86 (was 136, 137, 138, 139 and 6). In each project: change these ids in its pages and docs (for example a page's create and update permission constants), and in `users.permissions` replace the old ids with the new ones (back up first; root gets its `/admin` ids again at startup).
+
+- **Rules for every project:** `AGENTS.md` is shorter and the source of truth, each rule marked Enforced, Rule or Default, with the project structure; the detail moves to `docs/backend.md` (structure, data, settings, routes, scripts, scale and speed, security) and `docs/frontend.md` (replaces `docs/page.md`: login, the 5-item account menu, sync, settings, screens, layout, size and colour, scale), with user management in its own `docs/user-management.md`. Atom is a backend: front-end parts are Defaults.
+- **`docs/align.md`:** one procedure for an AI agent to bring a project, or a folder of them, up to the latest Atom and in line with `AGENTS.md`, auditing structure, security, speed and scale, pages and clean-up in one run.
+- **`script.check` standard score:** in a project, the summary line ends with `standard Rules x/y, Defaults x/y` and lists what is missed (secrets in code, asyncpg only, `.env` ignored, feature files, page login flow, account menu, sync, settings, export, no outside scripts, viewport, CSS variables). Report only: it never fails the check.
+- **Page theme default:** the theme block reads `<html data-default-theme>`; an app page starts light, Atom's own pages stay dark.
+- **PgWeb:** a field modal of one size for every type, editing by type (JSON editor, array item rows, true/false, date and date-time pickers, `users.password` hashed); a compact Add row form with the columns set later folded; filters on the Columns, Indexes and Constraints tabs with a Reset; every download asks first and says what it holds; the row panel shows `table.key` with a copy icon and downloads the row vertically; the query runner reports a write's status, and Explain refuses a script.
+
+## [15.8.0] - 2026-11-17
+
+Monitor, Analytics and PgWeb get clearer, shorter and more consistent; Monitor gains a database upgrade check. Nothing to change in projects; set `config_postgres_storage_gb` to use the disk part of the check.
+
+- **Monitor, Database tab: upgrade check.** One verdict (no upgrade needed, keep an eye on it, upgrade recommended) from the server's own counters: disk (how full, and when it fills, with the new optional `config_postgres_storage_gb`), connections, memory (reads served from RAM), work memory (spills to disk), write load (WAL per checkpoint interval against `max_wal_size`) and deadlocks; an upgrade lists what to ask DevOps for, with a button that copies the request. The connection picker is gone: the tab reads the master database, named once in the page header.
+- **Monitor:** shorter texts on every tab; chart bars show their value on hover (a tip drawn by the page, not the browser's slow `title`).
+- **Analytics:** each figure in one section only, with the range dropdown above the figures it changes and each one's change against the previous period; new charts (active users, response time, error rate) and an Overview of headlines that open their section; tiles with rows behind them open a list in a dialog, paged after a cursor (`/admin/object-read` for users, no total count); chart values on hover.
+- **Monitor, Analytics and PgWeb:** the database under the page name as host / database (the host shortened where narrow, so the database shows); a click opens its URL, password hidden, with a copy icon.
+- **PgWeb:** the query runner is the first row of the table list; dialogs restyled; copy buttons work where the browser blocks the clipboard API.
+- **API page:** the refresh icon is gone from the search bar (Sync re-downloads the list).
+
 ## [15.7.1] - 2026-11-17
 
 `readme.md` shows the version as a release badge (the latest GitHub Release, updated by CI) instead of a `Version` line, so a release no longer edits `readme.md`; a test still checks `ATOM_VERSION` and the top `CHANGELOG.md` entry agree. Nothing to change in projects.
