@@ -1,27 +1,18 @@
-# integration
+# database
 config_postgres_url_dict = {}
 config_redis_url_dict = {}
 config_mssql_url_dict = {}
 config_clickhouse_url_dict = {}
 config_mongodb_url = None
-config_google_login_client_id = None
-config_openai_key = None
-config_gemini_key = None
-config_anthropic_key = None
-config_posthog_project_host = None
-config_posthog_project_key = None
-config_sentry_dsn = None
-config_sentry_traces_sample_rate = 0.05
-config_fast2sms_url = None
-config_fast2sms_key = None
-config_resend_url = None
-config_resend_key = None
-config_sftp_host = None
-config_sftp_port = None
-config_sftp_username = None
-config_sftp_password = None
-config_sftp_known_hosts_path = None
-config_sftp_is_host_verify = True
+
+# queue
+config_kafka_url = None
+config_kafka_username = None
+config_kafka_password = None
+config_rabbitmq_url = None
+config_celery_url = None
+
+# cloud
 config_aws_access_key_id = None
 config_aws_secret_access_key = None
 config_aws_s3_region_name = None
@@ -35,11 +26,29 @@ config_azure_sms_from_number = None
 config_msgraph_tenant_id = None
 config_msgraph_client_id = None
 config_msgraph_client_secret = None
-config_kafka_url = None
-config_kafka_username = None
-config_kafka_password = None
-config_rabbitmq_url = None
-config_celery_url = None
+config_sftp_host = None
+config_sftp_port = None
+config_sftp_username = None
+config_sftp_password = None
+config_sftp_known_hosts_path = None
+config_sftp_is_host_verify = True
+
+# messaging
+config_fast2sms_url = None
+config_fast2sms_key = None
+config_resend_url = None
+config_resend_key = None
+
+# ai
+config_openai_key = None
+config_gemini_key = None
+config_anthropic_key = None
+
+# monitoring
+config_posthog_project_host = None
+config_posthog_project_key = None
+config_sentry_dsn = None
+config_sentry_traces_sample_rate = 0.05
 
 # app
 config_is_prod = True
@@ -75,6 +84,7 @@ config_cache_row_limit_users_deleted = 10000
 
 # auth
 config_root_user_password = None
+config_google_login_client_id = None
 config_login_password = None
 config_token_secret_key = None
 config_access_token_expires_sec = 604800
@@ -106,7 +116,6 @@ config_buffer_limit_default = 100
 config_buffer_limit_log_api = 1000
 config_buffer_rows_max = 100000
 config_postgres_buffer_flush_auto_sec = 60
-config_postgres_storage_gb = None
 
 # log_api
 config_is_log_api = True
@@ -149,7 +158,7 @@ config_blob_expire_sec_upload = 3600
 config_blob_expire_sec_preview = 360000
 
 # service
-config_queue_services = ["redis", "rabbitmq", "kafka", "celery"]
+config_queue_services = ["postgres", "redis", "rabbitmq", "kafka", "celery"]
 config_queue_concurrency = 10
 config_queue_retry_max = 3
 config_queue_retry_wait_sec = 2
@@ -160,9 +169,9 @@ config_ai_services = ["gemini", "openai", "claude"]
 
 # table
 config_table_exclude_from_users_delete = ["spatial_ref_sys", "users", "log_users_delete"]
-config_table_write_blocked = ["log_api", "log_users_password", "log_users_delete", "script_run", "otp", "spatial_ref_sys"]
-config_table_my_create_blocked = ["users", "log_api", "log_users_password", "otp", "script_run", "spatial_ref_sys"]
-config_table_my_read_blocked = ["users", "config", "log_users_password", "otp", "script_run", "spatial_ref_sys"]
+config_table_write_blocked = ["log_api", "log_users_password", "log_users_delete", "script_run", "queue_job", "otp", "spatial_ref_sys"]
+config_table_my_create_blocked = ["users", "log_api", "log_users_password", "otp", "script_run", "queue_job", "spatial_ref_sys"]
+config_table_my_read_blocked = ["users", "config", "log_users_password", "otp", "script_run", "queue_job", "spatial_ref_sys"]
 config_table_my_delete_all_allowed = ["test", "message", "notification"]
 config_table_public_create_allowed = ["test"]
 config_table_public_read_allowed = ["test"]
@@ -213,6 +222,9 @@ config_column_int_mapping = {
 },
 "script_run": {
 "status": {1: "Running", 2: "Done", 3: "Failed"},
+},
+"queue_job": {
+"status": {1: "Waiting", 2: "Failed"},
 },
 "log_users_delete": {
 "type": {1: "User Soft Deleted", 2: "User Restored", 3: "User Hard Deleted"},
@@ -387,6 +399,17 @@ config_postgres = {
 {"name":"peak_memory_mb","datatype":"integer"},
 {"name":"finished_at","datatype":"timestamptz"}
 ],
+"queue_job":[
+{"name":"id","datatype":"bigint","identity":"always","is_primary": True},
+{"name":"created_at","datatype":"timestamptz","default":"now()"},
+{"name":"updated_at","datatype":"timestamptz"},
+{"name":"channel","datatype":"text","is_mandatory": True},
+{"name":"payload","datatype":"jsonb","is_mandatory": True},
+{"name":"status","datatype":"smallint","is_mandatory": True,"default":1,"in":(1,2)},
+{"name":"attempt","datatype":"integer","is_mandatory": True,"default":0},
+{"name":"run_at","datatype":"timestamptz","is_mandatory": True,"default":"now()","index":"btree(channel,status,run_at,id)"},
+{"name":"error","datatype":"text"}
+],
 "log_users_delete":[
 {"name":"id","datatype":"bigint","identity":"always","is_primary": True},
 {"name":"created_at","datatype":"timestamptz","default":"now()","index":"btree(created_at)"},
@@ -512,14 +535,14 @@ config_api = {
 "/admin/postgres-query-runner-write": {"id": 86, "is_active": True, "is_token": True, "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_permission": {"mode": "realtime"}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
 "/admin/postgres-query-runner-read": {"id": 87, "is_token": True, "user_check_role": {"mode": "token", "roles": [1]}, "is_connection_param": True},
 "/admin/postgres-query-runner-read-export": {"id": 88, "is_token": True, "user_check_role": {"mode": "inmemory", "roles": [1]}, "is_connection_param": True},
-"/admin/postgres-query-generator-ai": {"id": 89, "is_token": True, "user_check_role": {"mode": "token", "roles": [1]}, "is_connection_param": True},
+"/admin/postgres-query-ai": {"id": 89, "is_token": True, "user_check_role": {"mode": "token", "roles": [1]}, "is_connection_param": True},
 "/admin/mssql-query-runner-write": {"id": 90, "is_token": True, "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
 "/admin/mssql-query-runner-read": {"id": 91, "is_token": True, "user_check_role": {"mode": "token", "roles": [1]}},
 "/admin/mssql-query-runner-read-export": {"id": 92, "is_token": True, "user_check_role": {"mode": "realtime", "roles": [1]}},
 "/admin/clickhouse-query-runner-write": {"id": 93, "is_token": True, "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
 "/admin/clickhouse-query-runner-read": {"id": 94, "is_token": True, "user_check_role": {"mode": "token", "roles": [1]}},
 "/admin/clickhouse-query-runner-read-export": {"id": 95, "is_token": True, "user_check_role": {"mode": "inmemory", "roles": [1]}},
-"/admin/clickhouse-query-generator-ai": {"id": 96, "is_token": True, "user_check_role": {"mode": "token", "roles": [1]}},
+"/admin/clickhouse-query-ai": {"id": 96, "is_token": True, "user_check_role": {"mode": "token", "roles": [1]}},
 }
 
 # override

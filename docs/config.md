@@ -12,13 +12,14 @@ Every `config_*` value is read once, at startup, in this order; a later one wins
 |---|---|---|
 | 1 | `config.py` | Atom's defaults |
 | 2 | `config_extend.py` | the project's defaults and structure (tables, routes); git-tracked, survives `sync.py`. See [extend.md](extend.md); startup stops if its `config_api`, `config_postgres` or `config_column_int_mapping` drops any of Atom's routes, Postgres entries or mapped codes ([what is checked](extend.md#what-startup-checks-in-config_extendpy)) |
-| 3 | `.env` | one machine's values: secrets, URLs, flags |
+| 3 | `.env` | one machine's values: secrets, URLs, flags (or the file `ATOM_ENV_FILE` names: [local run](#local-run)) |
 | 4 | environment variables | a server's settings (Azure app settings, `docker run -e`, CI); `.env` never overwrites a variable that is already set |
 
 Example: `config_extend.py` has `config_schedule_script_report = "off"`; a laptop without the key in `.env` keeps `off`, a server with `config_schedule_script_report=daily 02:00` in its settings runs it at 02:00. `func_config_load` (`function/config.py`, called from `main.py`) does the merge; the result is `app.state.config_<name>`.
 
 - **Type:** an overriding value takes the type of the default in code: a `True`/`False` default reads `true`/`false` (also `1`/`0`, `yes`/`no`, `on`/`off`; anything else stops startup), a number reads a number, a list or dict reads JSON (a value that is not valid JSON leaves the code's value), a string stays text (all digits become an integer). A key with no default in code is guessed the same way ([section 2](#2-dynamic-env-discovery--type-inference)).
 - **When:** only at startup; a changed `.env` or server setting applies after a restart (Azure restarts the app when a setting changes).
+- **Local run:** <a id="local-run"></a>`ATOM_ENV_FILE=<path>/local.env venv/bin/python main.py` makes the app (and Atom's scripts) read that file instead of `.env`, so none of `.env`'s real databases and services is reachable; a name that is not a file stops startup. Three keys are enough: `config_postgres_url_master` of a throwaway local database (with `postgis`, `pg_trgm` and `btree_gin`), `config_root_user_password` and `config_token_secret_key` (any random values); a feature that needs another service adds its own throwaway local one (`config_redis_url_<name>`, `config_clickhouse_url_<name>`, ...). Startup creates the schema and the `admin` user. An AI agent keeps the file and everything the run makes in its own folder `~/.atom/<project>/` outside the project, reused by its next run, and names its databases and containers `<project>_agent`, so the developer never sees them (AGENTS.md, Work).
 - **Checks:** startup validates the merged values, so a bad one (`config_schedule_script_report=daily 2am`) stops the app with its name.
 
 > **Rule of Thumb**: Use `.env` for secrets, credentials, and environment flags; use `config_extend.py` for structural changes (tables, custom route policies).
@@ -76,7 +77,7 @@ config_payment_gateway_url=https://payments.example.com
 
 The sections are only comments: the backend and every script load the whole file, and a repeated key silently takes the last value. So `# atom` and `# extend` are active, and every line in a `# script.<name>` section is commented out; a developer uncomments the section where the script runs. An active copy of a backend key would change the backend's value, and an active `config_<db>_url_<name>` line makes the backend open a pool to that database at startup (startup fails when it can't be reached).
 
-A script reads these values in its `# config` section with `load_dotenv(".env")` and `os.getenv("<exact key>")`, so the names in the script and in `.env` match. Settings that have a default in code (`config_column_regex`, buffer limits) are imported in `# import` with `from config import ...`.
+A script reads these values in its `# config` section with `load_dotenv(os.environ.get("ATOM_ENV_FILE", ".env"))` and `os.getenv("<exact key>")`, so the names in the script and in `.env` match. Settings that have a default in code (`config_column_regex`, buffer limits) are imported in `# import` with `from config import ...`.
 
 ### Accessing in Routes:
 ```python
@@ -98,7 +99,9 @@ All scalar and list settings in `config.py` grouped by section:
 
 ### Integrations
 
-Disabled (`None`) by default; activated automatically when connection credentials are set.
+Disabled (`None`) by default; activated automatically when connection credentials are set. In `config.py` they are the sections from `# database` to `# monitoring`.
+
+#### Database
 
 | Key | Usage |
 |---|---|
@@ -111,18 +114,21 @@ Disabled (`None`) by default; activated automatically when connection credential
 | `config_mssql_url_dict` | Runtime mapping of named MSSQL connection strings; pools in `client_mssql_dict` |
 | `config_clickhouse_url_<name>` | ClickHouse DSN per named server, collected into `config_clickhouse_url_dict`; the `/admin/clickhouse-*` routes pick one with body param `connection` (default `master`; unknown name → 404) |
 | `config_clickhouse_url_dict` | Runtime mapping of named ClickHouse URLs; clients in `client_clickhouse_dict`, schemas in `cache_clickhouse_schema_dict` |
-| `config_google_login_client_id` | Google OAuth Client ID for token verification |
-| `config_openai_key` | OpenAI API key |
-| `config_gemini_key` | Google Gemini API key |
-| `config_anthropic_key` | Anthropic API key: opens `client_anthropic` (Claude) |
-| `config_posthog_project_host` | PostHog analytics host URL |
-| `config_posthog_project_key` | PostHog analytics project key |
-| `config_sentry_dsn` | Sentry DSN for error tracking |
-| `config_sentry_traces_sample_rate` | Share of requests Sentry traces and profiles, 0 to 1 (default `0.05`). Every error is still sent. Tracing every request (`1.0`) adds noticeable overhead to each one; raise it briefly while investigating a slow route. |
-| `config_fast2sms_url` | Fast2SMS gateway URL |
-| `config_fast2sms_key` | Fast2SMS API key |
-| `config_resend_url` | Resend email API URL |
-| `config_resend_key` | Resend email API key |
+
+#### Queue
+
+| Key | Usage |
+|---|---|
+| `config_kafka_url` | Apache Kafka broker URL |
+| `config_kafka_username` | Kafka SASL username |
+| `config_kafka_password` | Kafka SASL password |
+| `config_rabbitmq_url` | RabbitMQ broker URL |
+| `config_celery_url` | Celery broker/backend URL |
+
+#### Cloud
+
+| Key | Usage |
+|---|---|
 | `config_sftp_host` | SFTP server hostname |
 | `config_sftp_port` | SFTP server port |
 | `config_sftp_username` | SFTP server username |
@@ -139,17 +145,39 @@ Disabled (`None`) by default; activated automatically when connection credential
 | `config_azure_email_connection_string` | Azure email connection string |
 | `config_azure_sms_connection_string` | Azure Communication Services SMS connection string |
 | `config_azure_sms_from_number` | Azure SMS sender phone number or alphanumeric sender ID |
-| `config_kafka_url` | Apache Kafka broker URL |
-| `config_kafka_username` | Kafka SASL username |
-| `config_kafka_password` | Kafka SASL password |
-| `config_rabbitmq_url` | RabbitMQ broker URL |
-| `config_celery_url` | Celery broker/backend URL |
+
+#### Messaging
+
+| Key | Usage |
+|---|---|
+| `config_fast2sms_url` | Fast2SMS gateway URL |
+| `config_fast2sms_key` | Fast2SMS API key |
+| `config_resend_url` | Resend email API URL |
+| `config_resend_key` | Resend email API key |
+
+#### AI
+
+| Key | Usage |
+|---|---|
+| `config_openai_key` | OpenAI API key |
+| `config_gemini_key` | Google Gemini API key |
+| `config_anthropic_key` | Anthropic API key: opens `client_anthropic` (Claude) |
+
+#### Monitoring
+
+| Key | Usage |
+|---|---|
+| `config_posthog_project_host` | PostHog analytics host URL |
+| `config_posthog_project_key` | PostHog analytics project key |
+| `config_sentry_dsn` | Sentry DSN for error tracking |
+| `config_sentry_traces_sample_rate` | Share of requests Sentry traces and profiles, 0 to 1 (default `0.05`). Every error is still sent. Tracing every request (`1.0`) adds noticeable overhead to each one; raise it briefly while investigating a slow route. |
 
 ### System & Security
 
 | Key | Usage |
 |---|---|
 | `config_root_user_password` | Password for seeded root admin (hashed at startup) |
+| `config_google_login_client_id` | Google OAuth Client ID for token verification |
 | `config_login_password` | Static login password for `/auth/login-password` (Must set in `.env` if used) |
 | `config_token_secret_key` | HMAC secret key for signing/verifying JWT tokens *(Must change)*. With `config_is_prod` on, startup refuses keys shorter than 32 bytes; generate one with `python3 -c "import secrets; print(secrets.token_urlsafe(48))"` |
 | `config_root_html_path` | Path to static HTML file served at `/` (default: Atom's home page, which lists every page in `static/` and `static_extend/`) |
@@ -188,7 +216,6 @@ Disabled (`None`) by default; activated automatically when connection credential
 | `config_mssql_pool_min_size` | Minimum connections per SQL Server pool (default: `1`) |
 | `config_mssql_pool_max_size` | Maximum connections per SQL Server pool (default: `10`) |
 | `config_postgres_pool_min_size_<name>`, `config_postgres_pool_max_size_<name>` | One database's pool size, e.g. `config_postgres_pool_max_size_test=3`; others keep the shared sizes. `config_mssql_pool_min_size_<name>`, `config_mssql_pool_max_size_<name>` do the same for SQL Server. An unknown `<name>` stops startup |
-| `config_postgres_storage_gb` | The disk size, in GB, of the master database's server, as DevOps set it (e.g. Azure storage `32`), which PostgreSQL itself can't see. Monitor's upgrade check uses it for how full the disk is and when it fills. Default: none (the check shows the data size and growth only) |
 | `config_mssql_pool_recycle_sec` | Reopen SQL Server connections older than this, in seconds (default: `1800`) |
 | `config_otp_length` | Digit length generated for OTP codes (default: `6`) |
 | `config_otp_expiry_sec` | Expiry window for OTP codes in seconds (default: `600`) |
@@ -282,9 +309,9 @@ The `/permission/*` routes' settings, together as `config_permission_*` (the rou
 
 | Key | Usage |
 |---|---|
-| `config_queue_services` | Registered background queue providers (`redis`, `rabbitmq`, `kafka`, `celery`) |
+| `config_queue_services` | Registered background queue providers (`postgres`, the default, `redis`, `rabbitmq`, `kafka`, `celery`) |
 | `config_queue_concurrency` | Jobs a consumer runs at once (default 10) |
-| `config_queue_retry_max` | Retries of a failed job before it is kept in `<channel>_failed` (default 3) |
+| `config_queue_retry_max` | Retries of a failed job before it is kept (Postgres: `status` 2 in `queue_job`; brokers: `<channel>_failed`) (default 3) |
 | `config_queue_retry_wait_sec` | Wait before the first retry, doubled each time: 2, 4, 8 s (default 2) |
 | `config_blob_services` | Registered blob storage providers (`s3`, `azure`) |
 | `config_email_services` | Registered email providers (`ses`, `resend`, `azure`) |

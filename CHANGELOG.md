@@ -4,6 +4,51 @@ Every Atom release with notes, newest first. Versions follow [semver](https://se
 
 Pin or roll back a project to a version: `python3 sync.py --ref v15.6.1` ([docs/sync.md](docs/sync.md)).
 
+## [16.8.0] - 2026-11-19
+
+- **Redis keys start with the app's name:** every response-cache, user-state and rate-limit key now starts with the app's master database name (`finance:cache:api:...`, `pulse:ratelimiter:...`), so apps sharing one Redis never read each other's keys; nothing to set. Old unprefixed keys are no longer read and expire on their own (the first requests after the update miss the cache once). Queue channels are unchanged: each app keeps its own `config_redis_url_queue`. Monitor's Redis tab shows the app's prefix ([docs/redis.md](docs/redis.md)).
+
+## [16.7.0] - 2026-11-19
+
+- **Postgres queue, the default:** background jobs need no broker. `?queue=postgres` on `/my/object-create` and `/my/object-update` (or `app_state.func_producer(queue="postgres", client_postgres=...)`) adds a row to the new table `queue_job` and returns its id; `venv/bin/python -m script.consumer_postgres <channel>` runs it. Jobs are taken with `FOR UPDATE SKIP LOCKED` inside a transaction held until the job is finished, so several consumers can share a channel and a killed one leaves nothing stuck; `LISTEN/NOTIFY` wakes consumers at once; retries wait in `run_at`; a job failed after `config_queue_retry_max` retries stays with `status` 2 and its error. Redis, RabbitMQ, Kafka and Celery are unchanged ([docs/queue.md](docs/queue.md)).
+- **Rules are checked by code:** `script.check` has a `rules` step that fails a project on: a secret in code or docs, Postgres through anything but asyncpg, `.env` missing from `.gitignore`, a pool or SDK client opened in `function_extend/` or `router_extend/` (scripts may open their own), a role or permission check in `router_extend/` (`config_api` does it). Each break is named with its file and line. The report-only score is now `standard Defaults x/y` (no Rules part).
+- **Front end is Defaults only:** `AGENTS.md` and `docs/frontend.md` say plainly that every front-end point is a suggestion a page may follow or not; the two former front-end Rules (standalone page storage and escaping, keeping the login alive) are Defaults. Only how Atom serves pages and the route paths they call stay enforced.
+
+## [16.6.0] - 2026-11-19
+
+- **Monitor: Redis tab:** `/page/monitor` has a Redis tab (`GET /admin/monitor?view=redis`) with one block per `config_redis_url_<name>`, headed by its key name and URL: ping from the server, memory and its limit, keys, hit ratio, ops per second, clients, evictions, eviction policy, version and uptime; read-only, an unreachable one shows its error, and none configured says so ([docs/admin.md](docs/admin.md)).
+- **`config_postgres_storage_gb` removed:** Monitor shows only what the servers report. The upgrade check's Disk signal becomes **Data size** (size and growth, marked Info, never an upgrade), since PostgreSQL can't see the disk size; a project that set the key can drop it from `.env` (it is ignored).
+
+## [16.5.3] - 2026-11-19
+
+- **AGENTS.md: agents reuse their work:** the agent's local run lives in its own folder `~/.atom/<project>/` (outside the project, so the developer never sees it), kept between runs instead of removed: `local.env`, the `<project>_agent` database with its test data and seed script, and `notes.md` (Atom version last audited, what changed, what was skipped and why, what to check next). Every run reads it first and keeps it current; anything that no longer matches the code is rebuilt; no `.env` values or production data. Update's later run reads `notes.md` to propose only what drifted.
+
+## [16.5.2] - 2026-11-19
+
+- **AGENTS.md local run is invisible to the developer:** the agent keeps `local.env` and everything its run makes in its own scratch folder outside the project (its scratchpad, else a temporary folder), never in the project's `tmp/`; it names its databases and containers `<project>_agent` (never a developer's own `_local` one), starts the app on a free port with `uvicorn`, and removes it all when done; the developer sees only the result.
+
+## [16.5.1] - 2026-11-19
+
+- **AGENTS.md local run:** a feature that needs another service (Redis, ClickHouse, RabbitMQ, ...) also gets a throwaway local one in `tmp/local.env`, never `.env`'s; everything the run makes stays in `tmp/`, local databases and containers are named `<project>_local` and removed when done ([docs/config.md](docs/config.md#local-run)).
+
+## [16.5.0] - 2026-11-19
+
+- **Local run on a throwaway database:** `ATOM_ENV_FILE=tmp/local.env venv/bin/python main.py` makes the app and Atom's scripts read that file instead of `.env`, so a local run never reaches `.env`'s real databases and services; a name that is not a file stops startup. Three keys are enough: `config_postgres_url_master` of a throwaway local database, `config_root_user_password`, `config_token_secret_key` ([docs/config.md](docs/config.md#local-run)). A script's `# config` now reads `load_dotenv(os.environ.get("ATOM_ENV_FILE", ".env"))`; a project script may switch to the same line.
+- **AGENTS.md:** an agent never starts the app or runs a script with `.env`; it runs the app on the local run above and clicks through pages there. This replaces 16.4.1's "back up first", which did not work for large databases.
+
+## [16.4.1] - 2026-11-19
+
+- **AGENTS.md for agents working alone:** Enforced now names `script.check` with import, startup and sync; Work says every database and service in `.env` is real (starting the app applies schema changes to it; never run a script to see if it starts); Verify says a failing check is fixed at its cause, never by skipping or weakening a test, `# noqa`, editing Atom's core or changing `config_api` to suit a page.
+
+## [16.4.0] - 2026-11-19
+
+- **AI query routes run read-only:** `/admin/postgres-query-generator-ai` is now `/admin/postgres-query-ai` and `/admin/clickhouse-query-generator-ai` is now `/admin/clickhouse-query-ai` (same `config_api` ids; functions `func_postgres_query_ai`, `func_clickhouse_query_ai`). New body param `execute` (default `false`): with `true` the generated SQL also runs through the read runner (read-only transaction or `readonly=1`, 30 s timeout, row limit) and the response adds `rows`. A caller of the old path switches to the new one ([docs/database.md](docs/database.md)).
+- **`script.check` routes step:** in a project, every quoted path in `static_extend/` pages and `.js` files that starts like a `config_api` route (`/admin`, `/my`, `/auth`, the project's own `/<feature>`, ...) must be a `config_api` route; `${...}` counts as one route value, anything after `?` or `#` is ignored, `/static/` files and third-party URLs are not checked. A route Atom renames or removes now fails the check after sync with the page, line and path, instead of failing in production. AGENTS.md (Front end) says how to fix it: change the page, never `config_api`.
+
+## [16.3.1] - 2026-11-19
+
+- **`config.py` sections:** the one `# integration` section is split by kind of service into `# database`, `# queue`, `# cloud` (aws, azure, msgraph, sftp), `# messaging`, `# ai` and `# monitoring`; `config_google_login_client_id` moves to `# auth`. Keys and defaults are unchanged; [docs/config.md](docs/config.md) splits its Integrations table the same way.
+
 ## [16.3.0] - 2026-11-18
 
 - **`script.check` names step:** in a project, every `app_state.func_*` its code calls (`function_extend`, `router_extend`, `script_extend`, `files_extend`, `config_extend.py`) must be defined in Atom or the project; an unknown name fails the check with its file and line, so a function Atom renamed or removed fails in the check after sync instead of on that route in production.
