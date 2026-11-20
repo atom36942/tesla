@@ -1,5 +1,6 @@
 # import
 import asyncio
+import hashlib
 import re
 import secrets
 import time
@@ -117,10 +118,10 @@ async def func_token_encode(*, user: dict, config_token_secret_key: str, config_
     return {"access_token": access_token, "refresh_token": refresh_token, "access_token_expires_at": access_token_expires_at, "refresh_token_expires_at": refresh_token_expires_at}
 
 async def func_token_decode(*, headers: dict, config_token_secret_key: str, cache_token: OrderedDict | None = None, config_token_cache_max: int = 0) -> dict:
-    """Decode Bearer token if present; return decoded user dict or empty dict. With a cache, a verified token is reused until its own exp (the key is the full signed token, so an edited token misses and is verified again)."""
+    """Decode a Bearer JWT if present (an atk_ API key is left to func_api_key_decode); return decoded user dict or empty dict. With a cache, a verified token is reused until its own exp (the key is the full signed token, so an edited token misses and is verified again)."""
     auth_header = headers.get("Authorization")
     token = auth_header.split("Bearer ", 1)[1] if auth_header and auth_header.startswith("Bearer ") else None
-    if not token: return {}
+    if not token or token.startswith("atk_"): return {}    # an API key (func_api_key_decode)
     is_cache = cache_token is not None and config_token_cache_max > 0
     if is_cache:
         entry = cache_token.get(token)
@@ -133,6 +134,46 @@ async def func_token_decode(*, headers: dict, config_token_secret_key: str, cach
     if is_cache and isinstance(user, dict) and isinstance(decoded_payload.get("exp"), (int, float)):
         while len(cache_token) >= config_token_cache_max: cache_token.popitem(last=False)
         cache_token[token] = (user, decoded_payload["exp"])
+        return {k: v.copy() if isinstance(v, (list, dict)) else v for k, v in user.items()}
+    return user
+
+def func_api_key_hash(*, key: str) -> str:
+    """sha256 hex of an API key: the only form stored, so a database copy holds no usable key."""
+    return hashlib.sha256(key.encode()).hexdigest()
+
+async def func_api_key_create(*, client_postgres: asyncpg.Pool | None, user_id: int, name: str, scopes: list | None, expire_days: int | None, config_api_key_max: int) -> dict:
+    """Create an API key for user_id: an opaque atk_<random> string, returned once, stored as its sha256. A user holds at most config_api_key_max keys."""
+    if not client_postgres: raise func_api_error(message="postgres client not initialized", status_code=500)
+    key = "atk_" + secrets.token_urlsafe(32)
+    async with client_postgres.acquire() as conn, conn.transaction():
+        await conn.execute("SELECT pg_advisory_xact_lock(hashtext('api_key'), $1::int)", user_id % 2147483647)    # one create at a time per user, so the count below holds
+        if await conn.fetchval("SELECT count(*) FROM api_key WHERE created_by_id=$1", user_id) >= config_api_key_max: raise func_api_error(message=f"api key limit reached ({config_api_key_max}): delete one first", status_code=400)
+        row = await conn.fetchrow("INSERT INTO api_key (created_by_id, name, key_hash, key_prefix, scopes, expires_at) VALUES ($1, $2, $3, $4, $5, CASE WHEN $6::int IS NULL THEN NULL ELSE NOW() + make_interval(days => $6::int) END) RETURNING id, created_at, name, key_prefix, scopes, expires_at", user_id, name, func_api_key_hash(key=key), key[:12], scopes or None, expire_days)
+    return {**dict(row), "key": key}
+
+async def func_api_key_decode(*, headers: dict, client_postgres: asyncpg.Pool | None, cache_token: OrderedDict | None, config_token_cache_max: int, config_api_key_cache_sec: int, config_column_token_encode: list) -> dict:
+    """Resolve an `Authorization: Bearer atk_...` header to its owner's user dict, the same columns a JWT carries (config_column_token_encode) plus _token_type "api_key", _api_key_id and _api_key_scopes; {} without that header. A key is looked up by its sha256 and cached per worker for config_api_key_cache_sec (never past its expiry); an unknown or expired key, or a deleted or deactivated owner, is 401."""
+    auth_header = headers.get("Authorization")
+    if not auth_header or not auth_header.startswith("Bearer atk_"): return {}
+    key_hash = func_api_key_hash(key=auth_header[7:].strip())
+    cache_key, now = f"apikey:{key_hash}", time.time()
+    is_cache = cache_token is not None and config_token_cache_max > 0 and config_api_key_cache_sec > 0
+    if is_cache:
+        entry = cache_token.get(cache_key)
+        if entry and entry[1] > now: return {k: v.copy() if isinstance(v, (list, dict)) else v for k, v in entry[0].items()}
+        cache_token.pop(cache_key, None)
+    if not client_postgres: raise func_api_error(message="postgres client not initialized", status_code=500)
+    columns = ", ".join('u."' + str(c).replace('"', '""') + '"' for c in (config_column_token_encode or ["id", "role"]))
+    row = await client_postgres.fetchrow(f"SELECT {columns}, u.deleted_at AS _deleted_at, u.deactivated_at AS _deactivated_at, k.id AS _api_key_id, k.scopes AS _api_key_scopes, k.expires_at AS _expires_at FROM api_key k JOIN users u ON u.id=k.created_by_id WHERE k.key_hash=$1", key_hash)  # noqa: S608 - column names from config, quoted
+    if not row or (row["_expires_at"] and row["_expires_at"] <= datetime.now(UTC)): raise func_api_error(message="api key invalid or expired", status_code=401)
+    if row["_deleted_at"] or row["_deactivated_at"]: raise func_api_error(message="api key owner is deleted or deactivated", status_code=401)
+    user = orjson.loads(orjson.dumps({k: v for k, v in dict(row).items() if k not in ("_deleted_at", "_deactivated_at", "_expires_at")}, default=str))    # the same JSON types a decoded JWT has
+    user["_api_key_scopes"], user["_token_type"] = user["_api_key_scopes"] or [], "api_key"
+    if is_cache:
+        expires_at = now + config_api_key_cache_sec
+        if row["_expires_at"]: expires_at = min(expires_at, row["_expires_at"].timestamp())
+        while len(cache_token) >= config_token_cache_max: cache_token.popitem(last=False)
+        cache_token[cache_key] = (user, expires_at)
         return {k: v.copy() if isinstance(v, (list, dict)) else v for k, v in user.items()}
     return user
 
