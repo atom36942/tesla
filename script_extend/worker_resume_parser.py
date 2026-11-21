@@ -96,8 +96,8 @@ async def candidate_complete(*, conn: asyncpg.Connection, candidate_id: int, dat
     set_clauses, values = ["worker_status = 2", "worker_processed_at = NOW()", "worker_last_error = NULL", "updated_at = NOW()"], [candidate_id]
     for key, value in data.items():
         if key not in column_type or key in BASE_COLUMNS: continue
-        if value in ("", "null", "None") or (key in ("ctc_current", "ctc_expected") and value == 0): value = None
-        is_json = column_type[key] in ("json", "jsonb") and value is not None
+        if value in (None, "", "null", "None") or (key in ("ctc_current", "ctc_expected") and value == 0): continue    # nothing found in the resume: keep what the row already has
+        is_json = column_type[key] in ("json", "jsonb")
         values.append(json.dumps(value) if is_json else value)
         set_clauses.append(f'"{key}" = ${len(values)}{"::jsonb" if is_json else ""}')
     await conn.execute(f"UPDATE {TABLE_NAME} SET {', '.join(set_clauses)} WHERE id = $1", *values)  # noqa: S608 - constant table, columns limited to existing database columns

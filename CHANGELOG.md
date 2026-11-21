@@ -4,6 +4,26 @@ Every Atom release with notes, newest first. Versions follow [semver](https://se
 
 Pin or roll back a project to a version: `python3 sync.py --ref v15.6.1` ([docs/sync.md](docs/sync.md)).
 
+## [18.7.0] - 2026-11-21
+
+- **Front end: the backend contract only.** `AGENTS.md`, `docs/frontend.md` and `docs/user-management.md` now say only how a page works with Atom: the routes it calls, the login and token flow, storage named after the page, labels and limits from `/info`, cursor lists, streamed export and scale, plus Atom's own pages as reference code. The look and layout (account menu items and order, Settings, toasts, dialogs, palette, sizes, header and navigation, words, User management's columns and menus) are each project's own, kept in its `docs_extend/`. `script.check`'s standard no longer scores the account menu, Settings or CSS variables (9 Defaults, was 12). No project change needed.
+
+## [18.6.1] - 2026-11-21
+
+- **Steadier queue test:** the Redis killed-consumer test waits for the job to leave `<channel>_processing` instead of checking the instant the job reports done, so CI no longer fails on that timing.
+
+## [18.6.0] - 2026-11-21
+
+- **Incoming webhook verification:** a route another service calls (Stripe, GitHub, Razorpay, another Atom app) takes `"webhook_verify": {"scheme": "stripe", "secret": "config_webhook_secret_stripe"}` with `"auth": []` in its `config_api` entry; the middleware checks the HMAC-SHA256 signature of the raw body and the timestamp (`config_webhook_verify_tolerance_sec`, 300) before the route runs, answers 401 to a missing, forged or replayed call, gives the route `request.state.webhook`, and replays the body so the route reads it as usual. Schemes are data, not code: `config_webhook_verify_scheme` ships `standard` (Standard Webhooks, so Atom apps receive each other's webhooks), `stripe`, `github`, `shopify` and `razorpay`, and a project adds a provider with one dict (header, prefix or key, encoding, signed bytes, timestamp and id), checked at startup. OpenAPI adds `x-webhook-verify` ([docs/webhook.md](docs/webhook.md#incoming)).
+
+## [18.5.1] - 2026-11-21
+
+- **Webhook tests hold no secret-shaped string:** the integration tests make their signing secret per run, and the unit test's Standard Webhooks spec vector (public, not a key) is split, so GitHub secret scanning no longer reports it as a Stripe webhook secret.
+
+## [18.5.0] - 2026-11-21
+
+- **Outgoing webhooks:** Atom tells other systems when something happens, with a signed POST in the [Standard Webhooks](https://www.standardwebhooks.com) format (`webhook-id`, `webhook-timestamp`, `webhook-signature: v1,<HMAC-SHA256>`). An admin subscribes a URL to events with the new route `/admin/webhook-create` (it returns the `whsec_` signing secret once); a project's code calls `app_state.func_webhook_send(client_postgres=conn, event="shipment.delivered", data={...})`, which queues one delivery per active subscriber as a `queue_job` row on channel `channel_webhook`, in the caller's transaction (a rollback sends nothing). With `config_webhook_is_active` on (off by default), each app worker delivers them (`FOR UPDATE SKIP LOCKED`, never twice at once), retries a failure after 60 s doubled each time, and keeps it as failed with its error after 8 retries (`config_webhook_timeout_sec`, `config_webhook_retry_max`, `config_webhook_retry_wait_sec`, `config_webhook_poll_sec`). New table `webhook`; the URL must be `https` to a public address, checked at creation and before every delivery; `secret` joins `config_column_read_blocked`. Webhooks are listed, paused and deleted through the generic admin routes ([docs/webhook.md](docs/webhook.md)).
+
 ## [18.4.0] - 2026-11-21
 
 - **Ticket statuses for support:** New, In Progress, Blocked (stuck inside the company), Waiting (on the customer), Done. Only the labels of 1 (was To Do) and 4 (was Review) change; codes, colours and `closed_at` on Done stay, so no data changes.

@@ -304,7 +304,7 @@ The `/permission/*` routes' settings, together as `config_permission_*` (the rou
 | `config_column_audit_blocked` | Audit columns no request may set on any table, admin's included (default `created_at`, `created_by_id`, `updated_at`, `updated_by_id`, `deleted_at`, `deleted_by_id`): Atom sets them; admin create, update and CSV import refuse them |
 | `config_column_users_blocked` | `users` columns neither `/my/user-update` nor `/admin/user-update` may change (`created_*`, `updated_*`, `deleted_*`, `is_protected`, `last_active_at`); a project adds its own (e.g. a column only a script sets) |
 | `config_column_users_my_blocked` | `users` columns only `/admin/user-update` may change; `/my/user-update` refuses them (`role`, `permissions`, `deactivated_at`, ...) |
-| `config_column_read_blocked` | Sensitive columns blocked and stripped from read responses and relations (`password`, `key_hash`) |
+| `config_column_read_blocked` | Sensitive columns blocked and stripped from read responses and relations (`password`, `key_hash`, `secret`) |
 | `config_column_private_read_blocked` | Per table, the columns `/private/*` reads may not select, filter, sort or group by, on top of `config_column_read_blocked` (Atom: `script_run`'s `started_by`, `host`, `step`, `message`, `peak_memory_mb`, so any user may read the run list but not the server details); extend it in `config_extend.py` (`{**base, "invoice": ["cost"]}`) |
 | `config_column_users_private_read` | The only `users` columns `/private/user-read` returns, filters and sorts on (`id`, `username`, `name`, `role`, `permissions`, `created_at`, `deactivated_at`); readable by every logged-in user, checked at startup |
 
@@ -316,6 +316,13 @@ The `/permission/*` routes' settings, together as `config_permission_*` (the rou
 | `config_queue_concurrency` | Jobs a consumer runs at once (default 10) |
 | `config_queue_retry_max` | Retries of a failed job before it is kept (Postgres: `status` 2 in `queue_job`; brokers: `<channel>_failed`) (default 3) |
 | `config_queue_retry_wait_sec` | Wait before the first retry, doubled each time: 2, 4, 8 s (default 2) |
+| `config_webhook_is_active` | Runs the webhook delivery loop in the app, one per worker (default `False`) ([webhook.md](webhook.md)) |
+| `config_webhook_timeout_sec` | Seconds a receiver has to answer one delivery (default 10) |
+| `config_webhook_retry_max` | Retries of a failed delivery before it is kept as failed (`status` 2 in `queue_job`) (default 8) |
+| `config_webhook_retry_wait_sec` | Wait before a delivery's first retry, doubled each time: 60 s, 2 min, 4 min… (default 60) |
+| `config_webhook_poll_sec` | Seconds the delivery loop waits when nothing is due (default 5) |
+| `config_webhook_verify_scheme` | How each provider signs incoming webhooks: `standard`, `stripe`, `github`, `shopify`, `razorpay`; a project adds its own (`{**base, "acme": {...}}`), checked at startup ([webhook.md](webhook.md#schemes-are-data)) |
+| `config_webhook_verify_tolerance_sec` | Seconds an incoming webhook's timestamp may be off before it is refused as a replay (default 300) |
 | `config_blob_services` | Registered blob storage providers (`s3`, `azure`) |
 | `config_email_services` | Registered email providers (`ses`, `resend`, `azure`) |
 | `config_mobile_services` | Registered SMS providers (`sns`, `fast2sms`, `azure`) |
@@ -341,6 +348,7 @@ Keys are route paths as declared. A route with path parameters (`/page/{name}`) 
 | `is_active` | `bool` | Toggles endpoint availability (`False` disables the endpoint via middleware) |
 | `auth` | `list` | Required. The credentials the route accepts: `[]` public, `["jwt"]` a JWT access token, `["api_key"]` an API key, `["jwt", "api_key"]` either; both are sent as `Authorization: Bearer` ([auth.md](auth.md#7-api-keys-machine-access)) |
 | `is_connection_param` | `bool` | `True` lets `?connection=<name>` pick the database for this route (default master; unknown name is 404). Without it the route always uses master and `?connection=` is 400 |
+| `webhook_verify` | `dict` | `{"scheme": <name in config_webhook_verify_scheme>, "secret": <config_ setting holding the secret>}`: the route is called by another service and runs only with a valid signature of its raw body; `auth` must be `[]` ([webhook.md](webhook.md#incoming)) |
 | `is_log_api` | `bool` | `False` keeps this route's requests out of `log_api` (default `True`). Atom sets it for `/pgweb` (every click would add a row) and the health checks (probed every few seconds). |
 | `user_check_role` | `{"mode": "...", "roles": [...]}` | Restricts access to users with listed role numbers |
 | `user_check_permission` | `{"mode": "token"}` | Only users whose `permissions` hold this route's `id` ([Per-User Permissions](auth.md#per-user-permissions)) |
