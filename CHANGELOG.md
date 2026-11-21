@@ -4,6 +4,22 @@ Every Atom release with notes, newest first. Versions follow [semver](https://se
 
 Pin or roll back a project to a version: `python3 sync.py --ref v15.6.1` ([docs/sync.md](docs/sync.md)).
 
+## [18.8.1] - 2026-11-21
+
+- **Permissions ✓ looks clickable:** a small bordered button like the copy and edit buttons beside it, with a hover state.
+
+## [18.8.0] - 2026-11-21
+
+- **Permissions at a glance:** Login details in Atom's pages shows Permissions as a ✓ when the user holds any and a ✗ when none; a click on the ✓ opens a small dialog over it with a table of each permission's ID and Name (from `/info` `config_column_int_mapping.users.permissions`, `-` without one).
+
+## [18.7.2] - 2026-11-21
+
+- **Row lists like the apps':** Login details, My profile, Sync and every `Page.kv` dialog in Atom's pages are now a bordered list of rows, an icon and label on the left and the value (with its copy or edit button) on the right, one line between rows, no shaded label column: the same design as the apps built on Atom.
+
+## [18.7.1] - 2026-11-21
+
+- **Key-value rows right-aligned:** in Atom's pages (Login details, My profile and every `Page.kv` dialog) the value and its copy or edit button sit at the right of the row, as in the apps built on Atom.
+
 ## [18.7.0] - 2026-11-21
 
 - **Front end: the backend contract only.** `AGENTS.md`, `docs/frontend.md` and `docs/user-management.md` now say only how a page works with Atom: the routes it calls, the login and token flow, storage named after the page, labels and limits from `/info`, cursor lists, streamed export and scale, plus Atom's own pages as reference code. The look and layout (account menu items and order, Settings, toasts, dialogs, palette, sizes, header and navigation, words, User management's columns and menus) are each project's own, kept in its `docs_extend/`. `script.check`'s standard no longer scores the account menu, Settings or CSS variables (9 Defaults, was 12). No project change needed.
