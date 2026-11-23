@@ -7,7 +7,9 @@ from argon2 import PasswordHasher
 from .middleware import func_api_error
 from .validation import func_regex_check
 from .postgres_query import func_postgres_relation
+from .postgres_query import func_postgres_search_query
 from .postgres_query import func_postgres_serialize
+from .postgres_query import func_postgres_vector_text
 from .postgres_query import func_postgres_where_build
 from .postgres_page import func_page_after_next
 from .postgres_page import func_page_after_where
@@ -144,15 +146,31 @@ async def func_postgres_create(*, client_postgres: asyncpg.Pool | None, client_p
         async with client_postgres.acquire() as conn:
             return await _execute_now(conn)
 
-async def func_postgres_read_sql(*, client_postgres: asyncpg.Pool | None, client_password_hasher: PasswordHasher | None, cache_postgres_schema: dict, table: str, filter: list, order: str, column: str, config_column_read_blocked: list = None, after: Any = None, is_key_selected: bool = False, condition: str | None = None) -> tuple:
+def func_postgres_vector_columns(*, schema: dict) -> list:
+    """The vector columns (pgvector) of a table's schema."""
+    return [name for name, meta in schema.items() if str(meta.get("datatype") or "").lower().startswith("vector")]
+
+def func_postgres_vector_rows(*, schema: dict, rows: list) -> list:
+    """Vector values as lists of numbers (Postgres sends them as text)."""
+    for name in func_postgres_vector_columns(schema=schema):
+        for row in rows:
+            if isinstance(row.get(name), str): row[name] = orjson.loads(row[name])
+    return rows
+
+async def func_postgres_read_sql(*, client_postgres: asyncpg.Pool | None, client_password_hasher: PasswordHasher | None, cache_postgres_schema: dict, table: str, filter: list, order: str, column: str, config_column_read_blocked: list = None, after: Any = None, is_key_selected: bool = False, condition: str | None = None, is_rank_selected: bool = True) -> tuple:
     """The SELECT behind func_postgres_read and func_postgres_read_export, without LIMIT: (sql, values, keys), the table, columns, filters and order checked; values bound as $1, $2.
     The order (default id desc, id added last) comes from func_page_keys; after limits it to the rows after that cursor; is_key_selected adds the order columns a column list leaves out (func_postgres_read removes them again)."""
     blocked_cols = set(config_column_read_blocked) if config_column_read_blocked is not None else {"password"}
     if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", str(table)): raise Exception(f"invalid identifier {table}")
     if table not in (cache_postgres_schema or {}): raise Exception(f"table '{table}' not found")
-    keys = func_page_keys(order=order, columns=cache_postgres_schema[table])
+    schema = cache_postgres_schema[table]
+    search_cols = [name for name, meta in schema.items() if str(meta.get("datatype")) == "tsvector"]    # search columns: used in filters and order, never returned
+    vector_cols = func_postgres_vector_columns(schema=schema)    # vector columns: returned only when named
+    keys = func_page_keys(order=order, columns=schema)
     for key in keys:
         if key["name"] in blocked_cols: raise Exception(f"column '{key['name']}' is restricted from reading")
+        if key["name"] in search_cols: key.update(is_rank=True, type="float4", nullable=False, field=f"__rank_{key['name']}")    # ordered by how well each row matches the search
+        if key["name"] in vector_cols: key.update(is_rank=True, type="float8", nullable=False, field=f"__rank_{key['name']}")    # ordered by distance to the filter's vector
     column_list = "*"
     if column != "*":
         cols = []
@@ -160,11 +178,21 @@ async def func_postgres_read_sql(*, client_postgres: asyncpg.Pool | None, client
             c_strip = c.strip()
             if c_strip in blocked_cols: raise Exception(f"column '{c_strip}' is restricted from reading")
             if not re.match(r"^[a-zA-Z_][a-zA-Z0-9_]*$", str(c_strip)): raise Exception(f"invalid identifier {c_strip}")
-            if c_strip not in cache_postgres_schema[table]: raise Exception(f"column '{c_strip}' not found in table: {table}")
+            if c_strip not in schema: raise Exception(f"column '{c_strip}' not found in table: {table}")
+            if c_strip in search_cols: raise Exception(f"column '{c_strip}' is for search only: use it in a filter or the order")
             cols.append(c_strip)
-        if is_key_selected: cols += [key["name"] for key in keys if key["name"] not in cols]
+        if is_key_selected: cols += [key["name"] for key in keys if key["name"] not in cols and not key.get("is_rank")]
         column_list = ",".join([f'"{c}"' for c in cols])
+    elif search_cols or vector_cols: column_list = ",".join(f'"{c}"' for c in schema if c not in search_cols and c not in vector_cols)
     where_statement, values = await func_postgres_where_build(client_postgres=client_postgres, client_password_hasher=client_password_hasher, cache_postgres_schema=cache_postgres_schema, table=table, filter=filter, prefix="", config_column_read_blocked=config_column_read_blocked)
+    for key in (key for key in keys if key.get("is_rank")):
+        is_vector = key["name"] in vector_cols
+        operator = "<=>" if is_vector else "@@"
+        found = next((found[1] for item in (filter or []) if isinstance(item, str) and (found := re.match(rf'^\s*"?{key["name"]}"?\s+{re.escape(operator)}\s+(.+)$', item, re.IGNORECASE))), None)
+        if not found: raise func_api_error(message=f"order by {key['name']} needs its {'vector' if is_vector else 'search'}: a filter '{key['name']} {operator} {'[0.1,...]' if is_vector else '<words>'}'", status_code=400)
+        values.append(func_postgres_vector_text(value=found.strip(), datatype=str(schema[key["name"]].get("datatype"))) if is_vector else found.strip())
+        key["sql"] = f'("{key["name"]}" <=> ${len(values)}::vector)' if is_vector else f'ts_rank("{key["name"]}", {func_postgres_search_query(column=schema[key["name"]], bind=len(values))})'
+        if is_rank_selected: column_list += f', {key["sql"]} AS "{key["field"]}"'    # the cursor of the next page needs it
     after_sql = func_page_after_where(keys=keys, after=after, values=values)
     for extra in (after_sql, condition):    # condition: SQL built by the caller from checked identifiers (func_postgres_read's group_column)
         if extra: where_statement = f"WHERE ({where_statement[len('WHERE '):]}) AND {extra}" if where_statement else f"WHERE {extra}"
@@ -186,8 +214,8 @@ async def func_postgres_read(*, client_postgres: asyncpg.Pool | None, client_pas
     async with client_postgres.acquire() as conn:
         records = await conn.fetch(f"{sql} LIMIT ${len(values)}{f' OFFSET {offset}' if offset else ''}", *values)    # offset: an int from func_page_offset
         next_after = func_page_after_next(keys=keys, rows=records, limit=limit)
-        result_list = [dict(r) for r in records[:limit]]
-        added = [key["name"] for key in keys if column != "*" and key["name"] not in [c.strip() for c in column.split(",")]]
+        result_list = func_postgres_vector_rows(schema=cache_postgres_schema[table], rows=[dict(r) for r in records[:limit]])
+        added = [key["field"] if key.get("is_rank") else key["name"] for key in keys if key.get("is_rank") or (column != "*" and key["name"] not in [c.strip() for c in column.split(",")])]
         for r in result_list:
             for name in (*blocked_cols, *added): r.pop(name, None)
         if relation and result_list:
@@ -214,11 +242,11 @@ async def func_postgres_read_group(*, client_postgres: asyncpg.Pool, client_pass
     # identifiers pattern-checked and quoted, the datatype from the schema cache, values bound as $n
     statement = f'SELECT g.value AS "__group", t.* FROM unnest(${len(values) - 1}::text[]) g(value) CROSS JOIN LATERAL ({sql} LIMIT ${len(values)}) t'  # noqa: S608
     records = await client_postgres.fetch(statement, *values)
-    added = [key["name"] for key in keys if column != "*" and key["name"] not in [c.strip() for c in column.split(",")]]
+    added = [key["field"] if key.get("is_rank") else key["name"] for key in keys if key.get("is_rank") or (column != "*" and key["name"] not in [c.strip() for c in column.split(",")])]
     groups = {}
     for text in texts:
         found = [record for record in records if record["__group"] == text]
-        rows = [{k: v for k, v in dict(record).items() if k != "__group" and k not in blocked_cols and k not in added} for record in found[:limit]]
+        rows = func_postgres_vector_rows(schema=cache_postgres_schema[table], rows=[{k: v for k, v in dict(record).items() if k != "__group" and k not in blocked_cols and k not in added} for record in found[:limit]])
         groups[text] = {"obj_list": rows, "after": func_page_after_next(keys=keys, rows=found, limit=limit)}
     return {"groups": groups}
 

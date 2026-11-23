@@ -172,6 +172,8 @@ Replace the `filter` value with any of these JSON examples. Columns must exist a
 | Null equality | `["completed_at = null"]` → `IS NULL`, `!= null` → `IS NOT NULL`; other operators reject `null` |
 | Date/time range | `["created_at >= 2026-09-01T00:00:00Z","created_at < 2026-10-01T00:00:00Z"]` |
 | Simple OR | `["status = pending OR status = active","priority >= 2"]` |
+| Full-text search | `["search @@ printer working -toner"]` on a `tsvector` column, ranked with `order=search desc` ([crud-search.md](crud-search.md)) |
+| Nearest rows | `["embedding <=> [0.12,-0.4,...]"]` on a `vector` column, closest first with `order=embedding` ([crud-vector.md](crud-vector.md)) |
 
 For nested logic, use `_and` / `_or` objects. Leaf values use `operator,value`; list/range values in this form use `|` separators:
 
@@ -423,7 +425,7 @@ The effective condition is `id = 135 AND assigned_to_id = current_user.id`. If o
 
 ### Anyone's rows, for selected users (`/permission/object-*`)
 
-Off until a table is in `config_permission_table`, and then only for users holding the id of that table and action in `users.permissions`; nobody but root holds them until granted. Same requests as the `/my` routes (`?table=` on every one, delete's body `{"ids": [...]}`), without the owner filter. The same guards stay: `users` and `config_table_write_blocked` are refused, protected columns cannot change, `created_by_id`/`updated_by_id` is the caller, the batch limit applies. Reads take `filter`, `order`, `column`, `limit` and `after`/`page`, without relations. Detail in [auth.md](auth.md#object-permissions-one-id-per-table-and-action).
+Off until a table is in `config_permission_table`, and then only for users holding the id of that table and action in `users.permissions`; nobody but root holds them until granted. Same requests as the `/my` routes (`?table=` on every one, delete's body `{"ids": [...]}`), without the owner filter. The same guards stay: `users` and `config_table_write_blocked` are refused, protected columns cannot change, `created_by_id`/`updated_by_id` is the caller, the batch limit applies. Reads take `filter`, `order`, `column`, `limit` and `after`/`page`, without relations. Detail in [auth.md](auth-permission.md#object-permissions-one-id-per-table-and-action).
 
 ```python
 # config_extend.py: selected users may change or delete anyone's task or comment

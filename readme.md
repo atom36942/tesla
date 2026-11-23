@@ -130,9 +130,44 @@ venv/bin/python -m script.check                 # must pass before a pull reques
 Then open a pull request against `main`. Details: [CONTRIBUTING.md](https://github.com/atom36942/atom/blob/main/CONTRIBUTING.md) · [Code of Conduct](https://github.com/atom36942/atom/blob/main/CODE_OF_CONDUCT.md) · [tests/README.md](tests/README.md)
 
 # Docs
-- **Start:** [quickstart](docs/quickstart.md) · [about](docs/about.md) · [config](docs/config.md) · [extend](docs/extend.md) · [sync](docs/sync.md) · [windows](docs/windows.md) · [faq](docs/faq.md) · [AGENTS.md](AGENTS.md)
-- **Features:** [auth](docs/auth.md) · [crud](docs/crud.md) · [backend](docs/backend.md) · [front end](docs/frontend.md) · [user management](docs/user-management.md) · [ownership](docs/ownership.md) · [database](docs/database.md) · [timescaledb](docs/timescaledb.md) · [schedule](docs/schedule.md) · [redis](docs/redis.md) · [queue](docs/queue.md) · [webhook](docs/webhook.md) · [messaging](docs/messaging.md) · [storage](docs/storage.md)
-- **Operate:** [admin](docs/admin.md) · [performance](docs/performance.md) · [benchmark](docs/benchmark.md) · [security](docs/security.md) · [audit](docs/audit.md) · [tests](tests/README.md)
+| Area | Doc | About |
+|---|---|---|
+| Start | [quickstart](docs/quickstart.md) | Run Atom, sign up, log in and write your first records |
+|  | [about](docs/about.md) | Why Atom is built this way, and where each file lives |
+|  | [config](docs/config.md) | Every setting in config.py and .env, with its default |
+|  | [extend](docs/extend.md) | Where a project's own routes, tables, pages and code go |
+|  | [sync](docs/sync.md) | Updating a project to a new Atom, pinning, rolling back |
+|  | [windows](docs/windows.md) | Running Atom and its scripts on Windows |
+|  | [faq](docs/faq.md) | Common questions and quick answers |
+|  | [AGENTS.md](AGENTS.md) | Rules every project and AI agent follows, and Update |
+| Auth | [auth](docs/auth.md) | Users, roles, every login method, tokens, password reset |
+|  | [auth-permission](docs/auth-permission.md) | Give selected users create, read, update, delete per table |
+|  | [auth-api-key](docs/auth-api-key.md) | API keys for other systems, scoped and revocable |
+|  | [auth-totp](docs/auth-totp.md) | Two-factor login with an authenticator app (TOTP) |
+|  | [auth-oidc](docs/auth-oidc.md) | Sign in with Google, Microsoft or any OIDC provider |
+|  | [user-management](docs/user-management.md) | Add, edit, deactivate and invite an app's users |
+| Data | [crud](docs/crud.md) | Create, read, update, delete any table: filters, paging |
+|  | [crud-search](docs/crud-search.md) | Search words in text, ranked by relevance (Postgres) |
+|  | [crud-vector](docs/crud-vector.md) | Find rows by meaning with AI embeddings (pgvector) |
+|  | [ownership](docs/ownership.md) | Users read and change only the rows they own |
+|  | [database](docs/database.md) | Connections, tables from config, AI questions in plain words |
+|  | [timescaledb](docs/timescaledb.md) | Time-series data with TimescaleDB |
+|  | [storage](docs/storage.md) | Upload and serve files in S3 or Azure Blob |
+| Jobs | [queue](docs/queue.md) | Background jobs on Postgres, or Redis, RabbitMQ, Kafka, Celery |
+|  | [schedule](docs/schedule.md) | Run scripts on a schedule |
+|  | [webhook](docs/webhook.md) | Send signed webhooks out, verify the ones coming in |
+|  | [messaging](docs/messaging.md) | In-app messages and chat, email and SMS |
+|  | [redis](docs/redis.md) | Cache, rate limits and shared state in Redis |
+| Build | [backend](docs/backend.md) | How to write routes, functions and SQL the Atom way |
+|  | [frontend](docs/frontend.md) | Pages: login flow, lists, storage, export |
+| Operate | [admin](docs/admin.md) | Built-in pages (database, monitor, API, tickets), admin APIs |
+|  | [performance](docs/performance.md) | Tuning, indexes and profiling slow routes |
+|  | [benchmark](docs/benchmark.md) | Measured requests per second and latency |
+|  | [security](docs/security.md) | How each request is checked, and what is protected |
+|  | [audit](docs/audit.md) | Security audit: findings and fixes |
+|  | [tests](tests/README.md) | Running the unit and integration tests |
+
+Showcase for everyone: `/page/atom` on any Atom app.
 
 # License
 MIT.

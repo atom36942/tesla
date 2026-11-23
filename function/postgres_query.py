@@ -1,6 +1,8 @@
 # import
 import asyncio
+import math
 import re
+from typing import Any
 from collections import defaultdict
 from datetime import date
 from datetime import datetime
@@ -59,6 +61,7 @@ async def func_postgres_serialize(*, client_postgres: asyncpg.Pool | None, clien
         return cast_val
     def value_converter(dtype):
         dtype = normalize_dtype(dtype)
+        if dtype.startswith("vector"): return lambda val: func_postgres_vector_text(value=val, datatype=dtype)
         is_json, is_array = "json" in dtype, "[]" in dtype or "array" in dtype
         if is_json:
             if is_base: return lambda val: orjson.dumps(val).decode("utf-8") if not isinstance(val, str) else val
@@ -96,17 +99,35 @@ async def func_postgres_serialize(*, client_postgres: asyncpg.Pool | None, clien
         output_list.append(new_item)
     return output_list
 
+def func_postgres_vector_text(*, value: Any, datatype: str = "vector") -> str:
+    """A vector value as pgvector text ("[0.1,0.2]"): from a list of numbers or that text, as many as the column's datatype says (vector(1536)); anything else, an empty list or a non-finite number is refused."""
+    try: numbers = orjson.loads(value) if isinstance(value, str) else value
+    except orjson.JSONDecodeError: numbers = None
+    if not isinstance(numbers, list) or not numbers or not all(isinstance(x, (int, float)) and not isinstance(x, bool) and math.isfinite(x) for x in numbers): raise Exception("a vector is a list of numbers: [0.12,-0.4,...]")
+    if (size := re.search(r"\((\d+)\)", str(datatype))) and len(numbers) != int(size[1]): raise Exception(f"the vector has {len(numbers)} numbers, the column {datatype} takes {size[1]}")
+    return "[" + ",".join(repr(float(x)) for x in numbers) + "]"
+
+def func_postgres_search_language(*, column: dict) -> str:
+    """The text search language of a tsvector column, read from its generated expression (to_tsvector('english', ...)), so a search reads words the way the column stored them; 'simple' when none is named."""
+    found = re.search(r"to_tsvector\('([a-z_]+)'", str(column.get("default") or ""))
+    return found[1] if found else "simple"
+
+def func_postgres_search_query(*, column: dict, bind: int) -> str:
+    """The tsquery of a search for a tsvector column: the words bound as $bind, read as a search box reads them (websearch: "a phrase", -excluded, or)."""
+    return f"websearch_to_tsquery('{func_postgres_search_language(column=column)}', ${bind})"
+
 async def func_postgres_where_build(*, client_postgres: asyncpg.Pool | None, client_password_hasher: PasswordHasher | None, cache_postgres_schema: dict, table: str, filter: list, prefix: str = "", config_column_read_blocked: list = None) -> tuple:
     """Build a SQL WHERE clause with support for recursion, logical operators (_or, _and), flat SQL strings, and explicit operator syntax."""
     if not table: raise Exception("table required")
     if cache_postgres_schema is not None and table not in cache_postgres_schema: raise Exception(f"table '{table}' not found")
     values = []
     blocked_cols = set(config_column_read_blocked) if config_column_read_blocked is not None else {"password"}
-    filter_pattern = r'^((?:"[^"]+")|[a-zA-Z_][a-zA-Z0-9_]*)\s+(is\s+not\s+distinct\s+from|is\s+distinct\s+from|is\s+not|not\s+in|>=|<=|==|!=|<>|~\*|=|>|<|eq|neq|gt|lt|gte|lte|is|in|between|like|ilike|~|contains|exists|overlap|any|point)\s+(.*)$'
+    filter_pattern = r'^((?:"[^"]+")|[a-zA-Z_][a-zA-Z0-9_]*)\s+(is\s+not\s+distinct\s+from|is\s+distinct\s+from|is\s+not|not\s+in|@@|<=>|>=|<=|==|!=|<>|~\*|=|>|<|eq|neq|gt|lt|gte|lte|is|in|between|like|ilike|~|contains|exists|overlap|any|point)\s+(.*)$'
     value_ops = {"=":"=","==":"=","eq":"=","!=":"!=","<>":"!=","neq":"!=",">":">","gt":">","<":"<","lt":"<",">=":">=","gte":">=","<=":"<=","lte":"<=","is":"IS","is not":"IS NOT","in":"IN","not in":"NOT IN","between":"BETWEEN","is distinct from":"IS DISTINCT FROM","is not distinct from":"IS NOT DISTINCT FROM"}
     string_ops = {"like":"LIKE","ilike":"ILIKE","~":"~","~*":"~*"}
     table_schema = cache_postgres_schema.get(table, {})
     def normalize_filter_value(operator, raw_val):
+        if operator in ("@@", "<=>"): return raw_val.strip()    # the search words as typed (quotes mark a phrase), or the vector
         raw_val = raw_val.strip().strip("'").strip('"').strip("(").strip(")")
         return raw_val.replace(" AND ", "|").replace(",", "|") if operator in ("between", "in", "not in", "overlap", "contains") else raw_val
     def parse_filter_item(item):
@@ -134,7 +155,7 @@ async def func_postgres_where_build(*, client_postgres: asyncpg.Pool | None, cli
                 for key, val in item.items(): add_filter(key, val)
                 continue
             if not isinstance(item, str): raise Exception(f"invalid filter: {item!r}")
-            or_parts = re.split(r"\s+OR\s+", item, flags=re.IGNORECASE)
+            or_parts = [item] if re.match(r"^\s*\S+\s+@@\s", item) else re.split(r"\s+OR\s+", item, flags=re.IGNORECASE)    # a search's own "or" stays in it
             if len(or_parts) > 1:
                 add_filter("_and", [{"_or": [parse_filter_item(part) for part in or_parts]}])
                 continue
@@ -150,6 +171,8 @@ async def func_postgres_where_build(*, client_postgres: asyncpg.Pool | None, cli
         if filter_key not in table_schema: raise Exception(f"invalid filter column: {filter_key} for table: {table}")
         if not re.match(r"^[a-zA-Z0-9_\s\(\)\-\.]+$", str(filter_key)): raise Exception(f"invalid identifier {filter_key}")
     def allowed_operators(datatype, is_json, is_array):
+        if datatype == "tsvector": return ["@@"]    # a search column takes words, nothing else
+        if datatype.startswith("vector"): return ["<=>", "is", "is not"]    # a vector column: its nearest rows, or whether it is filled
         allowed_ops = list(value_ops.keys())
         if any(x in datatype for x in ("text", "char", "varchar")): allowed_ops += list(string_ops.keys())
         if is_array: allowed_ops += ["contains", "overlap", "any"]
@@ -246,6 +269,11 @@ async def func_postgres_where_build(*, client_postgres: asyncpg.Pool | None, cli
             operator, raw_val = [x.strip() for x in expression.split(",", 1)]
             operator = operator.lower()
             if operator not in allowed_operators(datatype, is_json, is_array): raise Exception(f"invalid operator: {operator} for {filter_key}")
+            if operator == "@@":    # full-text search: the words as typed, read in the column's own language
+                conditions.append(f'{prefix}"{filter_key}" @@ {func_postgres_search_query(column=table_schema[filter_key], bind=bind_next(raw_val))}'); continue
+            if operator == "<=>":    # nearest rows: the vector is checked here and bound by the order (order=<column>); the filter keeps rows that have one
+                func_postgres_vector_text(value=raw_val, datatype=datatype)
+                conditions.append(f'{prefix}"{filter_key}" IS NOT NULL'); continue
             serialized_val = await serialize_filter_value(filter_key, operator, raw_val, datatype, is_json, is_array)
             condition_sql = build_condition_sql(filter_key, operator, serialized_val, is_json)
             if condition_sql: conditions.append(condition_sql)

@@ -50,6 +50,9 @@ def func_postgres_schema_config_validate(*, config_postgres: dict) -> None:
                     raise Exception(f"{table_name}.{name} {key} must be bool")
             if name.lower() in reserved:
                 raise Exception(f"Column name '{name}' in table '{table_name}' is a PostgreSQL reserved keyword. Please rename it.")
+            if "generated" in col:
+                if not isinstance(col["generated"], str) or not col["generated"].strip(): raise Exception(f"{table_name}.{name} generated must be the SQL expression of the column")
+                if mixed := [key for key in ("default", "is_mandatory", "in", "regex", "check", "unique", "old") if key in col]: raise Exception(f"{table_name}.{name} is generated: Postgres fills it, so it takes no {', '.join(mixed)}")
             if "regex" in col and "[]" in dtype.lower():
                 raise Exception(f"Regex constraint is not supported for array column {table_name}.{name}. Remove 'regex' key to resolve.")
             if col.get("index"):
@@ -66,9 +69,13 @@ def func_postgres_schema_config_validate(*, config_postgres: dict) -> None:
                                 raise Exception(f"Index column '{ic}' in {table_name}: after the name only asc or desc, then nulls first or nulls last (btree(deviation_days desc nulls last,id))")
                             if order and index_type != "btree":
                                 raise Exception(f"Index column '{ic}' in {table_name}: a sort direction only on btree indexes")
+                        if (index_type == "hnsw") != dtype.lower().startswith("vector"):
+                            raise Exception(f"{table_name}.{name}: a vector column takes an hnsw index, and hnsw only a vector column")
+                        if index_type == "hnsw" and len(index_cols) != 1:
+                            raise Exception(f"hnsw index on {table_name}.{name} takes one column")
                         if index_type == "gin":
-                            if not any(x in dtype.lower() for x in ("[]", "jsonb", "text", "varchar")):
-                                raise Exception(f"GIN index is not compatible with '{dtype}' on {table_name}.{name}. Supported: arrays, jsonb, text, varchar.")
+                            if not any(x in dtype.lower() for x in ("[]", "jsonb", "text", "varchar", "tsvector")):
+                                raise Exception(f"GIN index is not compatible with '{dtype}' on {table_name}.{name}. Supported: arrays, jsonb, text, varchar, tsvector.")
                         elif index_type == "gist":
                             if not any(x in dtype.lower() for x in ("geography", "geometry", "box", "circle", "point", "polygon")):
                                 raise Exception(f"GIST index is not compatible with '{dtype}' on {table_name}.{name}. Supported: geography, geometry, spatial types.")
@@ -136,17 +143,34 @@ def func_postgres_schema_sql_queries(sql_config: Any):
     elif isinstance(sql_config, str) and sql_config.strip(): yield sql_config
 
 async def func_postgres_schema_extensions_init(*, conn: asyncpg.Connection, extensions: list) -> None:
-    """Install configured PostgreSQL extensions when privileges permit."""
-    installed = {r[0] for r in await conn.fetch("SELECT extname FROM pg_extension WHERE extname = ANY($1::text[])", list(extensions))} if extensions else set()
+    """Install the configured PostgreSQL extensions that are missing. Every one is optional: one this server lacks or this user may not install is skipped with a warning, never stopping startup; a column that needs it stops startup instead (func_postgres_schema_types_check)."""
+    if not extensions: return
+    rows = await conn.fetch("SELECT name, installed_version FROM pg_available_extensions WHERE name = ANY($1::text[])", list(extensions))
+    available, installed = {r[0] for r in rows}, {r[0] for r in rows if r[1]}
     for extension in extensions:
-        try:
-            if extension not in installed: await conn.execute(f'CREATE EXTENSION "{extension}";')
-        except Exception as e:
-            if any(x in str(e).lower() for x in ("insufficient_privilege", "permission denied", "must be superuser")) or "pg_cron" in extension: print(f"⚠️  {f'extension {extension}':<30} : ❌ skipped (insufficient privileges)")
-            else: raise e
+        if extension in installed: continue
+        if extension not in available:
+            print(f"⚠️  {f'extension {extension}':<30} : ❌ skipped (not on this server)")
+            continue
+        try: await conn.execute(f'CREATE EXTENSION IF NOT EXISTS "{extension}";')
+        except Exception as e: print(f"⚠️  {f'extension {extension}':<30} : ❌ skipped ({str(e).splitlines()[0][:120]})")
+    return
+
+EXTENSION_TYPES = {"vector": "vector", "geography": "postgis", "geometry": "postgis"}
+
+async def func_postgres_schema_types_check(*, conn: asyncpg.Connection, tables: dict) -> None:
+    """Before any table changes: a column whose datatype comes from an extension (vector, geography, geometry) needs that extension installed, else startup stops naming the column and the extension."""
+    needed = {}
+    for table_name, column_configs in tables.items():
+        for col in column_configs:
+            base = str(col.get("datatype", "")).lower().split("(")[0].replace("[]", "").strip()
+            if base in EXTENSION_TYPES: needed.setdefault(base, f"{table_name}.{col['name']}")
+    for base, column in needed.items():
+        if await conn.fetchval("SELECT to_regtype($1) IS NULL", base): raise Exception(f"{column} is a {base} column: it needs the PostgreSQL extension {EXTENSION_TYPES[base]}, which this database doesn't have (add it to config_postgres extension, or install it: CREATE EXTENSION {EXTENSION_TYPES[base]})")
     return
 
 async def func_postgres_schema_tables_sync(*, conn: asyncpg.Connection, tables: dict, catalog: dict) -> None:
+    await func_postgres_schema_types_check(conn=conn, tables=tables)
     """Synchronize configured tables, columns, indexes, and constraints: the current state is read once for all tables, then only what differs is changed."""
     names = list(tables)
     existing_tables = {r[0] for r in await conn.fetch("SELECT c.relname FROM pg_class c JOIN pg_namespace n ON c.relnamespace = n.oid WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p') AND c.relname = ANY($1::text[])", names)}
@@ -155,13 +179,15 @@ async def func_postgres_schema_tables_sync(*, conn: asyncpg.Connection, tables: 
         primary_cfg = tables[table_name][0]
         identity_clause = f" GENERATED {primary_cfg['identity'].upper().replace('_', ' ')} AS IDENTITY" if primary_cfg.get("identity") else ""
         await conn.execute(f'CREATE TABLE IF NOT EXISTS "{table_name}" ("{primary_cfg["name"]}" {primary_cfg["datatype"]}{identity_clause} PRIMARY KEY);')
-    column_rows = await conn.fetch("SELECT t.relname, a.attname, format_type(a.atttypid, a.atttypmod) as type, a.attnotnull as notnull, pg_get_expr(ad.adbin, ad.adrelid) as default FROM pg_attribute a JOIN pg_class t ON a.attrelid = t.oid JOIN pg_namespace n ON t.relnamespace = n.oid LEFT JOIN pg_attrdef ad ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum WHERE t.relname = ANY($1::text[]) AND n.nspname = 'public' AND a.attnum > 0 AND NOT a.attisdropped", names)
+    column_rows = await conn.fetch("SELECT t.relname, a.attname, format_type(a.atttypid, a.atttypmod) as type, a.attnotnull as notnull, pg_get_expr(ad.adbin, ad.adrelid) as default, a.attgenerated = 's' AS generated, col_description(t.oid, a.attnum) AS comment FROM pg_attribute a JOIN pg_class t ON a.attrelid = t.oid JOIN pg_namespace n ON t.relnamespace = n.oid LEFT JOIN pg_attrdef ad ON a.attrelid = ad.adrelid AND a.attnum = ad.adnum WHERE t.relname = ANY($1::text[]) AND n.nspname = 'public' AND a.attnum > 0 AND NOT a.attisdropped", names)
     meta_rows = await conn.fetch("SELECT tablename, indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename = ANY($1::text[]) UNION ALL SELECT t.relname, con.conname FROM pg_constraint con JOIN pg_class t ON con.conrelid = t.oid JOIN pg_namespace n ON t.relnamespace = n.oid WHERE n.nspname = 'public' AND t.relname = ANY($1::text[])", names)
     for table_name, column_configs in tables.items():
         rows = [r[1:] for r in column_rows if r[0] == table_name]
         current_cols = {r[0]: r[1] for r in rows}
         current_notnulls = {r[0]: r[2] for r in rows}
         current_defaults = {r[0]: r[3] for r in rows}
+        current_generated = {r[0]: r[4] for r in rows}
+        current_comments = {r[0]: r[5] for r in rows}
         existing_meta = {r[1] for r in meta_rows if r[0] == table_name}
         table_changed = False
         renamed_cols = {}
@@ -170,6 +196,19 @@ async def func_postgres_schema_tables_sync(*, conn: asyncpg.Connection, tables: 
                 continue
             col_name = col_cfg["name"]
             col_type = col_cfg["datatype"]
+            if col_cfg.get("generated"):
+                # a generated column (Postgres fills it from other columns): marked with its expression's hash, rebuilt when the expression changes; it holds no data of its own
+                marker = f"atom generated {func_postgres_schema_hash(col_cfg['generated'])}"
+                if col_name in current_cols:
+                    if current_comments.get(col_name) == marker: continue
+                    if not current_generated.get(col_name): raise Exception(f"{table_name}.{col_name} is a plain column with data: rename it (old) or drop it before it becomes generated")
+                    await conn.execute(f'ALTER TABLE "{table_name}" DROP COLUMN "{col_name}"')
+                    existing_meta = {r[0] for r in await conn.fetch("SELECT indexname FROM pg_indexes WHERE schemaname = 'public' AND tablename = $1 UNION ALL SELECT con.conname FROM pg_constraint con JOIN pg_class t ON con.conrelid = t.oid JOIN pg_namespace n ON t.relnamespace = n.oid WHERE n.nspname = 'public' AND t.relname = $1", table_name)}
+                await conn.execute(f'ALTER TABLE "{table_name}" ADD COLUMN "{col_name}" {col_type} GENERATED ALWAYS AS ({col_cfg["generated"]}) STORED')
+                await conn.execute(f"COMMENT ON COLUMN \"{table_name}\".\"{col_name}\" IS '{marker}'")
+                current_cols[col_name] = col_type
+                table_changed = True
+                continue
             if col_name not in current_cols:
                 old_name = col_cfg.get("old") if col_cfg.get("old") not in (None, "") else None
                 if old_name and old_name in current_cols:
@@ -226,7 +265,7 @@ async def func_postgres_schema_tables_sync(*, conn: asyncpg.Connection, tables: 
                         catalog["idx"].add(idx_name)
                         if idx_name not in existing_meta:
                             # access method + operator class derived from the explicit token
-                            access_method, opclass = ("gin", "gin_trgm_ops") if index_type == "gin_trgm" else (index_type, None)
+                            access_method, opclass = {"gin_trgm": ("gin", "gin_trgm_ops"), "hnsw": ("hnsw", "vector_cosine_ops")}.get(index_type, (index_type, None))
                             if opclass:
                                 await conn.execute(f'CREATE INDEX IF NOT EXISTS "{idx_name}" ON "{table_name}" USING {access_method}("{index_cols[0]}" {opclass});')
                             else:
@@ -451,7 +490,7 @@ async def func_postgres_schema_tables_init(*, app_state: State, client_postgres:
 
 async def func_postgres_schema_steps(*, app_state: State, conn: Any, config_postgres: dict, context: dict, root_user_password_hash: str = None, lock_timeout_sec: int = 10) -> None:
     """The schema steps, in order, on one connection: startup runs them for real, func_postgres_schema_plan only records their statements."""
-    # extensions outside the transaction: a missing privilege is skipped, which must not abort the rest
+    # extensions outside the transaction: each is optional, and one skipped must not abort the rest
     await app_state.func_postgres_schema_extensions_init(conn=conn, extensions=config_postgres.get("extension") or [])
     # one transaction: other sessions see the old schema or the new one, never a table without its triggers
     async with conn.transaction():
@@ -485,8 +524,8 @@ async def func_postgres_schema_check(*, app_state: State, client_postgres: async
     return "schema check done"
 
 SCHEMA_RISKS = ((r"ALTER COLUMN .* TYPE ", "rewrites the table, which stays locked until it finishes"), (r"SET NOT NULL", "reads every row while the table is locked"),
-                (r"^\s*CREATE (UNIQUE )?INDEX (?!CONCURRENTLY)", "blocks writes to the table while the index builds"), (r"\bDROP (TABLE|COLUMN)\b", "removes data"))
-SCHEMA_ROUTINE = (r"^\s*CREATE OR REPLACE FUNCTION", r"^\s*DO \$\$", r"^\s*INSERT INTO users \(username, password, role\)", r"^\s*UPDATE users SET username = 'admin'", r"^\s*UPDATE users SET permissions = ")    # run on every start, whether anything changed or not
+                (r"^\s*CREATE (UNIQUE )?INDEX (?!CONCURRENTLY)", "blocks writes to the table while the index builds"), (r"\bDROP (TABLE|COLUMN)\b", "removes data"), (r"GENERATED ALWAYS AS .* STORED", "computes the column for every row while the table is locked"))
+SCHEMA_ROUTINE = (r"^\s*CREATE EXTENSION", r"^\s*CREATE OR REPLACE FUNCTION", r"^\s*DO \$\$", r"^\s*INSERT INTO users \(username, password, role\)", r"^\s*UPDATE users SET username = 'admin'", r"^\s*UPDATE users SET permissions = ")    # run on every start, whether anything changed or not
 
 async def func_postgres_schema_plan(*, app_state: State, client_postgres: asyncpg.Pool, config_postgres: dict) -> list:
     """The statements startup would run to match config_postgres, without running them: [{"sql", "risk", "table", "rows", "is_routine"}] (is_routine: runs on every start, whether anything changed or not). Catalog reads go to the database; every statement that would change it is recorded instead. Steps after a new table read the database as it is now, so a plan for a fresh database is incomplete."""
