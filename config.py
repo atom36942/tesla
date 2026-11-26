@@ -29,7 +29,7 @@ config_mongodb_url = None
 
 # postgres
 config_is_postgres_schema_init = True
-config_postgres_schema_lock_timeout_sec = 10
+config_postgres_lock_timeout_sec = 10
 config_postgres_pool_min_size = 1
 config_postgres_pool_max_size = 10
 config_postgres_query_timeout_sec = 0
@@ -270,7 +270,7 @@ config_column_int_mapping = {
 }
 
 # schema
-config_postgres = {
+config_postgres_schema_master = {
 "extension": ["postgis", "pg_trgm", "btree_gin", "vector"],
 "table":{
 "test":[
@@ -603,8 +603,8 @@ config_api = {
 "/private/table-column-distinct": {"id": 58, "auth": ["jwt"], "cache": {"mode": "inmemory", "ttl_sec": 10, "is_per_user": False}, "is_connection_param": True},
 # permission
 "/permission/object-create": {"id": 98, "auth": ["jwt"], "user_check_permission": {"mode": "token", "action": "create"}},
-"/permission/object-read": {"id": 99, "auth": ["jwt"], "user_check_permission": {"mode": "token", "action": "read"}},
-"/permission/object-read-export": {"id": 100, "auth": ["jwt"], "user_check_permission": {"mode": "token", "action": "read"}},
+"/permission/object-read": {"id": 99, "auth": ["jwt"], "user_check_permission": {"mode": "token", "action": "read"}, "is_connection_param": True},
+"/permission/object-read-export": {"id": 100, "auth": ["jwt"], "user_check_permission": {"mode": "token", "action": "read"}, "is_connection_param": True},
 "/permission/object-update": {"id": 59, "auth": ["jwt"], "user_check_permission": {"mode": "token", "action": "update"}},
 "/permission/object-delete": {"id": 60, "auth": ["jwt"], "user_check_permission": {"mode": "token", "action": "delete"}, "rate_limit": {"mode": "inmemory", "limit": 10, "window_sec": 60}},
 "/permission/user-create": {"id": 61, "auth": ["jwt"], "user_check_permission": {"mode": "token"}, "rate_limit": {"mode": "inmemory", "limit": 10, "window_sec": 60}},
@@ -612,14 +612,14 @@ config_api = {
 # admin
 "/admin/sync": {"id": 63, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}},
 "/admin/monitor": {"id": 64, "auth": ["jwt"], "user_check_role": {"mode": "token", "roles": [1]}, "is_log_api": False, "is_connection_param": True},
-"/admin/object-create": {"id": 65, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
-"/admin/object-update": {"id": 66, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
+"/admin/object-create": {"id": 65, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}, "is_connection_param": True},
+"/admin/object-update": {"id": 66, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}, "is_connection_param": True},
 "/admin/object-read": {"id": 67, "auth": ["jwt"], "user_check_role": {"mode": "token", "roles": [1]}, "is_connection_param": True},
 "/admin/object-read-export": {"id": 68, "auth": ["jwt"], "user_check_role": {"mode": "token", "roles": [1]}, "is_connection_param": True},
 "/admin/user-create": {"id": 69, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
 "/admin/user-update": {"id": 70, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
 "/admin/user-delete": {"id": 71, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "rate_limit": {"mode": "inmemory", "limit": 10, "window_sec": 60}, "user_check_deactivated": {"mode": "realtime"}},
-"/admin/object-delete": {"id": 72, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "user_check_deleted": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 10, "window_sec": 60}},
+"/admin/object-delete": {"id": 72, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "user_check_deleted": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 10, "window_sec": 60}, "is_connection_param": True},
 "/admin/table-column-groupby": {"id": 73, "auth": ["jwt"], "user_check_role": {"mode": "token", "roles": [1]}, "cache": {"mode": "inmemory", "ttl_sec": 10, "is_per_user": False}, "is_connection_param": True},
 "/admin/table-column-distinct": {"id": 74, "auth": ["jwt"], "user_check_role": {"mode": "token", "roles": [1]}, "cache": {"mode": "inmemory", "ttl_sec": 10, "is_per_user": False}, "is_connection_param": True},
 "/admin/postgres-import": {"id": 75, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "is_connection_param": True, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},

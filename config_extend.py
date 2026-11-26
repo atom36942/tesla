@@ -1,6 +1,6 @@
 # base
 from config import config_column_int_mapping as base_config_column_int_mapping
-from config import config_postgres as base_config_postgres
+from config import config_postgres_schema_master as base_config_postgres_schema_master
 
 # atom
 config_column_int_mapping = {
@@ -10,10 +10,10 @@ config_column_int_mapping = {
 },
 }
 
-config_postgres = {
-**base_config_postgres,
+config_postgres_schema_master = {
+**base_config_postgres_schema_master,
 "table": {
-**base_config_postgres["table"],
+**base_config_postgres_schema_master["table"],
 "jobseeker":[
 {"name":"id","datatype":"bigint","identity":"always","is_primary": True},
 {"name":"created_at","datatype":"timestamptz","default":"now()","index":"btree(created_at)"},

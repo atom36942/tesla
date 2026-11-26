@@ -4,6 +4,8 @@ Which users may call a route or act on a table, beyond their role. Part of [auth
 
 `users.permissions` (`smallint[]`, nullable) holds the permission ids a user holds. A permission id is either a route's `config_api` id (a route that asks for it) or an id from `config_permission_table` (one table and action on the `/permission/object-*` routes). `NULL` and `[]` grant none.
 
+It holds only those two kinds of id: what a user may call or do. Any other access a project needs, such as which rows a user may see (their countries, companies or branches), goes in its own `users` column added in `config_extend.py` (e.g. `report_country text[]`), never as made-up ids in `permissions`: the ids share one numbering with the routes, so a later route with the same id would be granted with it. Such a column is set only by an admin (`/admin/user-update`; add it to `config_column_users_my_blocked` and `config_permission_user_column_blocked`), and the project's routes read it from the database on each request, so a change applies without a new login.
+
 A request passes these gates, in order, before the route runs. Role and permission are independent: a route sets either or both, and either one needs a credential (a non-empty `auth`). Startup enforces each group's gate: every `/admin/*` route checks role 1 (other roles and a permission may be added), every `/permission/*` route checks a permission (a role may be added).
 
 | # | Gate | Route key | Fails with |
@@ -44,7 +46,7 @@ No route or function to write: a table, one map entry, labels and grants.
 
 | Step | Where | What |
 |---|---|---|
-| 1. The table | `config_extend.py`, `config_postgres` | The columns, plus `created_by_id`, `updated_by_id`, `updated_at` (create and update stamp them) and an index for every filter and sort |
+| 1. The table | `config_extend.py`, `config_postgres_schema_master` | The columns, plus `created_by_id`, `updated_by_id`, `updated_at` (create and update stamp them) and an index for every filter and sort |
 | 2. The actions | `config_extend.py`, `config_permission_table` | Only the actions the team needs, each its own id from 200 that no route uses: `"vendor": {"create": 220, "read": 221, "update": 222, "delete": 223}` |
 | 3. The labels | `config_extend.py`, `config_column_int_mapping["users"]["permissions"]` | `220: "Vendor create", 221: "Vendor read", ...`; startup refuses an unlabelled id |
 | 4. The grants | `PUT /admin/user-update` `{"id": <user>, "permissions": [221, 222]}` | Who may do what: a viewer 221, an editor 221 + 222, a lead all four; a user logs in again to get them (token mode); root holds them all |

@@ -77,18 +77,20 @@ async def func_lifespan(app: FastAPI):
         client_msgraph = app.state.func_client_msgraph(tenant_id=app.state.config_msgraph_tenant_id, client_id=app.state.config_msgraph_client_id, client_secret=app.state.config_msgraph_client_secret)
         client_postgres_pgweb = {}
         await app.state.func_check_postgres_connections(app_state=app.state, client_postgres_dict=client_postgres_dict)
+        # postgres schemas: each config_postgres_schema_<name> on its own database, master first
+        if not app.state.config_is_read_only:
+            root_user_password_hash = client_password_hasher.hash(str(app.state.config_root_user_password)) if app.state.config_root_user_password and app.state.config_is_postgres_schema_init else None
+            for name, schema in app.state.func_postgres_schema_dict(values=getattr(app.state, "_state", None) or vars(app.state)).items():
+                if not (client_postgres := client_postgres_dict.get(name)): continue
+                if not app.state.config_is_postgres_schema_init: await app.state.func_postgres_schema_check(app_state=app.state, client_postgres=client_postgres, config_postgres_schema=schema, name=name)
+                else:
+                    async with app.state.func_postgres_advisory_lock(client_postgres=client_postgres, lock_id=3): await app.state.func_postgres_schema_init(app_state=app.state, client_postgres=client_postgres, config_postgres_schema=schema, lock_timeout_sec=app.state.config_postgres_lock_timeout_sec, root_user_password_hash=root_user_password_hash)
         # postgres master
         postgres_master = client_postgres_dict.get("master")
-        if postgres_master and not app.state.config_is_read_only and app.state.config_is_postgres_schema_init:
-            async with app.state.func_postgres_advisory_lock(client_postgres=postgres_master, lock_id=3): await app.state.func_postgres_schema_init(app_state=app.state, client_postgres=postgres_master, config_postgres=app.state.config_postgres, lock_timeout_sec=app.state.config_postgres_schema_lock_timeout_sec, root_user_password_hash=client_password_hasher.hash(str(app.state.config_root_user_password)) if app.state.config_root_user_password else None)
-        if postgres_master and not app.state.config_is_read_only and not app.state.config_is_postgres_schema_init: await app.state.func_postgres_schema_check(app_state=app.state, client_postgres=postgres_master, config_postgres=app.state.config_postgres)
         postgres_master_schema = await app.state.func_postgres_schema_read(client_postgres=postgres_master) if postgres_master else {}
         cache_startup = await app.state.func_postgres_cache_read(client_postgres=postgres_master, is_config_table="config" in postgres_master_schema, config_cache_row_limit_config=app.state.config_cache_row_limit_config, config_cache_row_limit_users_role=app.state.config_cache_row_limit_users_role, config_cache_row_limit_users_deactivated=app.state.config_cache_row_limit_users_deactivated, config_cache_row_limit_users_deleted=app.state.config_cache_row_limit_users_deleted)
         cache_config, cache_users_role, cache_users_deactivated, cache_users_deleted = cache_startup["cache_config"], cache_startup["cache_users_role"], cache_startup["cache_users_deactivated"], cache_startup["cache_users_deleted"]
-        # postgres log
         client_postgres_log_api = client_postgres_dict.get(app.state.config_postgres_db_log_api) if app.state.config_is_log_api else None
-        if client_postgres_log_api and app.state.config_postgres_db_log_api != "master" and not app.state.config_is_read_only and app.state.config_is_postgres_schema_init:
-            async with app.state.func_postgres_advisory_lock(client_postgres=client_postgres_log_api, lock_id=3): await app.state.func_postgres_schema_tables_init(app_state=app.state, client_postgres=client_postgres_log_api, lock_timeout_sec=app.state.config_postgres_schema_lock_timeout_sec, tables={"log_api": app.state.config_postgres["table"]["log_api"]})
         # cache schema
         cache_postgres_schema_dict = {name: postgres_master_schema if name == "master" else await app.state.func_postgres_schema_read(client_postgres=pool) for name, pool in client_postgres_dict.items()}
         cache_clickhouse_schema_dict = {name: await app.state.func_clickhouse_schema_read(client_clickhouse=client) for name, client in client_clickhouse_dict.items()}
@@ -108,7 +110,7 @@ async def func_lifespan(app: FastAPI):
     yield
     try:
         await app.state.func_app_tasks_stop(app_state=app.state)
-        if not app.state.config_is_read_only:await app.state.func_postgres_buffer_flush_all(app_state=app.state, client_postgres=postgres_master, buffer_postgres_create=buffer_postgres_create, client_postgres_log_api=client_postgres_log_api, buffer_postgres_log_api=buffer_postgres_log_api)
+        if not app.state.config_is_read_only: await app.state.func_postgres_buffer_flush_all(app_state=app.state)
         # project shutdown runs before Atom's clients close; its errors never block that
         try: await app.state.func_app_extend_run(app_state=app.state, name="func_extend_shutdown")
         except Exception as e: print(f"❌ func_extend_shutdown error: {e}")
@@ -163,6 +165,9 @@ def middleware(asgi_app):
             is_connection_param = api_cfg.get("is_connection_param", False)
             # active check
             await app_state.func_middleware_check_active(is_active=is_active)
+            # caller ip and shared token: for a caller that can't sign (some device and IoT clouds), set per route; checked before the body is read
+            if (ip_allow := api_cfg.get("ip_allow")) is not None: app_state.func_middleware_check_ip_allow(client_ip=app_state.func_middleware_client_ip(request=request), ip_allow=ip_allow)
+            if token_verify := api_cfg.get("token_verify"): app_state.func_middleware_check_token_verify(request=request, token_verify=token_verify, secret=getattr(app_state, token_verify["secret"], None))
             # webhook signature: the route's caller is another service, proven by the HMAC of the raw body
             if webhook_verify := api_cfg.get("webhook_verify"): receive = await app_state.func_webhook_verify_request(request=request, receive=receive, webhook_verify=webhook_verify, config_webhook_verify_scheme=app_state.config_webhook_verify_scheme, config_webhook_verify_tolerance_sec=app_state.config_webhook_verify_tolerance_sec, secret=getattr(app_state, webhook_verify["secret"], None))
             # token
@@ -178,6 +183,7 @@ def middleware(asgi_app):
             await app_state.func_middleware_check_ratelimiter(client_redis=app_state.client_redis_dict.get("ratelimiter"), rate_limit=rate_limit, url_path=path, identifier=request.state.user.get("id") if request.state.user else app_state.func_middleware_client_ip(request=request), cache_ratelimiter=app_state.cache_ratelimiter)
             # postgres select
             request.state.client_postgres, request.state.cache_postgres_schema = app_state.func_middleware_postgres_select(client_postgres_dict=app_state.client_postgres_dict, cache_postgres_schema_dict=app_state.cache_postgres_schema_dict, is_connection_param=is_connection_param, connection=request.query_params.get("connection"))
+            request.state.connection = request.query_params.get("connection") or "master"    # the database's name: buffered rows and queued jobs keep it
             # cache
             user_id, query_params = (request.state.user.get("id") if request.state.user else 0), dict(request.query_params)
             response = await app_state.func_middleware_api_cache(mode="get", path=path, query_params=query_params, cache=cache, client_redis=app_state.client_redis_dict.get("api_response"), user_id=user_id, cache_api_response=app_state.cache_api_response, is_gzip_accepted="gzip" in request.headers.get("accept-encoding", ""))
