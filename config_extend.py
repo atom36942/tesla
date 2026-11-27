@@ -1,20 +1,13 @@
 # base
-from config import config_column_int_mapping as base_config_column_int_mapping
 from config import config_postgres_schema_master as base_config_postgres_schema_master
 
 # atom
-config_column_int_mapping = {
-**base_config_column_int_mapping,
-"jobseeker": {
-"worker_status": {None: "Pending", 1: "Processing", 2: "Completed", 3: "Failed", 4: "Dead"},
-},
-}
 
 config_postgres_schema_master = {
 **base_config_postgres_schema_master,
 "table": {
 **base_config_postgres_schema_master["table"],
-"jobseeker":[
+"jobseeker": {"my": ["create", "read", "update", "delete"], "admin": ["create", "read", "update", "delete"], "column": [
 {"name":"id","datatype":"bigint","identity":"always","is_primary": True},
 {"name":"created_at","datatype":"timestamptz","default":"now()","index":"btree(created_at)"},
 {"name":"created_by_id","datatype":"bigint"},
@@ -50,7 +43,7 @@ config_postgres_schema_master = {
 {"name":"portfolio_url","datatype":"text"},
 {"name":"languages","datatype":"text[]"},
 {"name":"gender","datatype":"text"},
-{"name":"worker_status","datatype":"smallint","in":(1,2,3,4),"index":"btree(worker_status,worker_next_retry_at,created_at)"},
+{"name":"worker_status","datatype":"smallint","in":(1,2,3,4),"index":"btree(worker_status,worker_next_retry_at,created_at)", "int_mapping": {None: "Pending", 1: "Processing", 2: "Completed", 3: "Failed", 4: "Dead"}},
 {"name":"worker_retry_count","datatype":"integer","default":0},
 {"name":"worker_next_retry_at","datatype":"timestamptz","default":"now()"},
 {"name":"worker_processed_at","datatype":"timestamptz"},
@@ -67,7 +60,7 @@ config_postgres_schema_master = {
 {"name":"summary","datatype":"text"},
 {"name":"projects","datatype":"jsonb",},
 {"name":"industry","datatype":"text"}
-],
+]},
 },
 }
 
