@@ -27,7 +27,7 @@ Atom's own:
 
 | Setting | Default | Script |
 |---|---|---|
-| `config_schedule_script_postgres_cleanup` | `every 1h` | `script/postgres_cleanup.py`: deletes OTP, API-log and finished `script_run` rows older than `config_retention_day_otp` (1), `config_retention_day_log_api` (7) and `config_retention_day_script_run` (90); a retention of `None` skips that table |
+| `config_schedule_script_postgres_cleanup` | `every 1h` | `script/postgres_cleanup.py`: deletes OTP, API-log and finished `script_run` rows older than `config_retention_day_table_otp` (1), `config_retention_day_table_log_api` (7) and `config_retention_day_table_script_run` (90); a retention of `None` skips that table |
 | `config_schedule_script_postgres_backup` | `off` | `script/postgres_backup.py`: every table of the master database to CSV, with its columns and indexes, from one snapshot, into `tmp/postgres_backup/<date_time>/`; keeps 7 days. Useful before changing data; on hosts whose disk is reset on deploy (Azure App Service, containers) it is a working copy, not disaster recovery |
 
 ## Write one
@@ -62,7 +62,7 @@ The lock covers only what is inside the block. Scripts whose runs may overlap ha
 ## How a run starts
 
 - **Startup:** when no `config_schedule_*` is on, nothing starts. Otherwise one loop starts with the app (not in read-only mode, only with a master database) and stops at shutdown; there is no `func_extend` to write.
-- **Every `config_schedule_check_sec`** (600; 60 to 3600; first a minute after startup), for each scheduled script, a run starts when all hold:
+- **Every 10 minutes** (first a minute after startup), for each scheduled script, a run starts when all hold:
   - its slot is open (the latest scheduled time has passed) and within the slot's first 4 hours, or its whole length when shorter, so a server back at 11:00 does not start a 02:00 job in office hours;
   - no run of it holds the lock;
   - no run finished Done in this slot (a run by hand counts);

@@ -4,6 +4,49 @@ Every Atom release with notes, newest first. Versions follow [semver](https://se
 
 Pin or roll back a project to a version: `python3 sync.py --ref v15.6.1` ([docs/sync.md](docs/sync.md)).
 
+## [22.0.0] - 2026-11-27
+
+**Upgrade (projects must change):** the `/permission/*` routes are gone; a user is granted the id of the `/admin/*` route instead. A page that called `/permission/object-update`, `-delete`, `-read`, `-create` or `/permission/user-create`, `-update` calls the same `/admin/*` route (`/admin/object-delete` takes `table` in the body: `{"table", "ids"}`). Remove `config_permission_table`, `config_permission_user_roles` and `config_permission_user_column_blocked` from `config_extend.py` (startup stops while one is set). In the data, replace the old ids in `users.permissions` with the admin route ids: 61 → 69 (`/admin/user-create`), 62 → 70 (`/admin/user-update`), a table's update id → 66 (`/admin/object-update`), its delete id → 72 (`/admin/object-delete`), its read id → 67 (`/admin/object-read`); users log in again.
+
+- **One permission rule: the route's id.** `user_check_permission` takes only `{"mode": "token" | "realtime"}` and checks the route's own `config_api` id in `users.permissions`; no `action`, no table map. Every `/admin/*` route uses it instead of `user_check_role` role 1 (startup refuses an admin route without it), so a role 1 user without the ids is refused, and any user granted an admin id may call that route. Admin writes check it live (`realtime`), so a revoked id stops the next request. Each admin id is labelled with its path in `config_column_int_mapping["users"]["permissions"]`. A grant is the whole route: `/admin/user-update` changes any user, `role` and `permissions` included, so grant it only to people trusted as admin ([docs/auth-permission.md](docs/auth-permission.md)).
+- **Root's permissions at every start:** `func_root_user_permissions_sync` sets user 1's `permissions` to every `/admin/*` route id (one `UPDATE`, only when they differ), outside schema init, so it also runs with `config_is_postgres_schema_init` off.
+- **Removed:** `router/permission.py` (`/permission/object-create`, `-read`, `-read-export`, `-update`, `-delete`, `/permission/user-create`, `-update`), `config_permission_table`, `config_permission_user_roles`, `config_permission_user_column_blocked`, `func_check_permission_user_role`. `/admin/user-create` refuses the same columns as before at creation (`config_column_users_my_blocked`, `config_column_single_update`, `config_column_users_blocked`).
+- **Fewer settings: webhook timing is fixed.** `config_webhook_timeout_sec` (10), `config_webhook_retry_max` (8), `config_webhook_retry_wait_sec` (60, doubled each retry), `config_webhook_poll_sec` (5) and `config_webhook_verify_tolerance_sec` (300) are gone; their values are now the defaults of the webhook functions. `config_webhook_is_active` and `config_webhook_verify_scheme` stay. Startup stops if `config_extend.py`, `.env` or the environment still sets one of the five, so a value is never silently ignored ([docs/webhook.md](docs/webhook.md)).
+- **Fewer settings: two internal timers are fixed.** `config_inmemory_cache_cleanup_auto_sec` (expired cache entries swept every 300 s) and `config_schedule_check_sec` (scheduled scripts checked every 600 s) are gone, with the same startup check. Settings a project, its host or its security policy may need to change stay.
+
+## [21.2.0] - 2026-11-27
+
+- **pgweb: Download in more formats.** The query runner's **Download** (every row, no row limit) saves **CSV**, **SQL dump (COPY)** (a psql script as `pg_dump` writes it: `CREATE TABLE`, then `COPY ... FROM stdin` with PostgreSQL's own rows; `psql -d <db> -f file.sql` loads it into another database, 2 million rows in about 4 s), **SQL INSERTs** (500 rows a statement, for any SQL client) or **JSON Lines**, any of them gzipped in the browser. The SQL formats take the table to load into (the query's first `FROM` table by default) and an optional `CREATE TABLE` from the result's columns and types. `/pgweb` `stream` takes `file_format` (`csv`, `copy`, `insert`, `jsonl`), `table_name` and `is_create` ([docs/admin.md](docs/admin.md)).
+- **pgweb: query results look like tables.** A result is a card headed "Query result" with its rows and time under the title and a download icon (CSV, JSON or XML) on the right, in place of the bar's message and Download result button; and the row panel opens beside it on the first row (click a row or use ↑/↓). The panel's line under its title is "Row n of N" for every table, keyed or not, and every result.
+- **pgweb: sidebar as a card.** The tabs, then one card with the list and a footer holding the count and the Search box; a new connection opens on Tables. The filter dialog combines conditions with **AND** or **OR**; Disconnect's confirm button is red; no grey lines between the cards.
+
+## [21.1.0] - 2026-11-27
+
+- **pgweb: filters with several conditions.** The Filter rows dialog shows rows that match **all** (AND) or **any** (OR) of up to 10 conditions (a searchable column, an operator that fits its type, a value). `/pgweb` `rows` takes `filters` (a list of `{col, op, value}`) and `filter_join` (`and` or `or`) in place of `filter_col`, `filter_op` and `filter_value`; columns are checked against the table, operators come from a fixed list and values go as parameters. The header's filter icon is blue while a filter is on and a red clear icon removes it ([docs/admin.md](docs/admin.md)).
+- **pgweb: query results never outgrow the browser.** The query runner shows at most 10,000 rows or 16 MB of data, whichever comes first (`{"truncated": true, "limit": "rows" | "size"}`). **Download** (before Execute) streams every row to a CSV file without showing it; **Download result** saves the rows shown as CSV, JSON or XML. **Reset** sits after it and turns red when there is something to reset.
+- **pgweb: a new layout.** Every view is cards on a grey backdrop: the rows grid and the row panel (always open, first row selected) with matching header bands, the detail tabs, Database info and Server health. The grid card's header holds the rows in view and the table's size (PostgreSQL's estimate of the whole table on hover), then page size and pages, then refresh, download, add, filter and clear. Dialogs have two widths (480 px for messages, 560 px for forms); every dropdown has one chevron.
+- **pgweb: sidebar.** Search, then one segmented control for **Tables**, **Views**, **Mat** and **SQL**, with the list's count in a footer. **SQL** opens the query runner beside a history of the queries that ran successfully (this browser only, per database, the last 50; a click loads one without running it; delete one or all).
+- **pgweb: the field window** shows every field's size in its header in one format (characters, items, bytes) and is a little smaller.
+- **Fix: pgweb's slow `LIKE` note.** A `%text%` filter taking 100 ms or more failed with "el is not a function" instead of offering the trigram index.
+- **Dependencies:** the python group bumped (FastAPI 0.162.7, google-genai 3.3.0, OpenAI 3.51.0, Sentry 2.75.0, PostHog 7.91.1, aio-pika 10.2.3, pyodbc 5.5.0, Ruff 0.17.5, coverage 7.17.3).
+
+## [21.0.1] - 2026-11-26
+
+- **pgweb is faster.** It now runs a query in one round trip, where it used to take about seven, and PostgreSQL can use parallel workers again. Read-only mode runs on a second pool, read-only by default. The CSV download comes from PostgreSQL's `COPY`, with values in PostgreSQL's text format: arrays `{a,b}`, booleans `t`/`f`. On an Azure database a query takes 75 ms instead of 516 ms. Locally, a CSV of 1,000,000 rows takes 1.5 s instead of 11.1 s. The session reset after typed SQL (pgweb, the admin query runners, exports) now runs after the response is sent ([docs/performance.md](docs/performance.md)).
+
+## [21.0.0] - 2026-11-26
+
+**Upgrade (projects must change):** the retention settings are renamed; rename them in `config_extend.py` and `.env` (an old name stops startup with its new name).
+
+| Before | After |
+|---|---|
+| `config_retention_day_otp` | `config_retention_day_table_otp` |
+| `config_retention_day_log_api` | `config_retention_day_table_log_api` |
+| `config_retention_day_script_run` | `config_retention_day_table_script_run` |
+| `config_retention_day_users_delete` | `config_retention_day_user_soft_deleted` |
+
+- **Explicit names:** `config_retention_day_table_<table>` deletes that table's rows older than N days; `config_retention_day_user_soft_deleted` is the days before a soft-deleted user's data is purged from every table.
+
 ## [20.0.0] - 2026-11-26
 
 **Upgrade (projects must change):** `config_postgres` is now `config_postgres_schema_master`. In `config_extend.py`, rename the import (`from config import config_postgres_schema_master as base_config_postgres_schema_master`), the variable and every `base_config_postgres` use; code that read `app_state.config_postgres` reads `app_state.config_postgres_schema_master`. `.env` `config_postgres_schema_lock_timeout_sec` becomes `config_postgres_lock_timeout_sec`. A project with `config_postgres_db_log_api` other than `master` moves `log_api` into that database's schema ([docs/database.md](docs/database.md#5-api-logging--telemetry-log_api)).

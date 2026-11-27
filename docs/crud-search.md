@@ -18,11 +18,10 @@ One generated column per table, from the text columns it covers, with a GIN inde
 
 - **Weights** `A` to `D`: a match in `A` (the title) ranks above one in `B` (the description).
 - **Language**: `english` knows word forms; `simple` matches exact words (names, codes, other languages such as Hindi). Searches read the column's own language, so they always match.
-- Atom's `ticket` table has one: title (A) and description (B).
 
 ## 2. Search
 
-Any read route (`/my/object-read`, `/permission/object-read`, `/public/object-read` and their exports) takes the filter, with the words as a search box would:
+Any read route (`/my/object-read`, `/private/object-read`, `/public/object-read`, `/admin/object-read` and their exports) takes the filter, with the words as a search box would:
 
 | You type | Finds |
 |---|---|
@@ -32,7 +31,7 @@ Any read route (`/my/object-read`, `/permission/object-read`, `/public/object-re
 | `scanner or printer` | Either |
 
 ```
-GET /permission/object-read?table=ticket&filter=["search @@ printer working -toner"]&order=search desc
+GET /admin/object-read?table=task&filter=["search @@ printer working -toner"]&order=search desc
 ```
 
 - `order=search desc`: best match first (`ts_rank`), paged after a cursor like any order; it needs the `search @@` filter.

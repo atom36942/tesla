@@ -54,7 +54,6 @@ config_export_limit = 1000000
 
 # cache
 config_redis_cache_ttl_sec = 3600
-config_inmemory_cache_cleanup_auto_sec = 300
 config_api_cache_inmemory_max_kb = 102400
 config_token_cache_max = 10000
 config_cache_row_limit_config = 1000
@@ -106,15 +105,14 @@ config_postgres_db_log_api = "master"
 
 # schedule
 config_schedule_timezone = "UTC"
-config_schedule_check_sec = 600
 config_schedule_script_postgres_cleanup = "every 1h"
 config_schedule_script_postgres_backup = "off"
 
 # retention
-config_retention_day_otp = 1
-config_retention_day_log_api = 7
-config_retention_day_users_delete = 30
-config_retention_day_script_run = 90
+config_retention_day_table_otp = 1
+config_retention_day_table_log_api = 7
+config_retention_day_user_soft_deleted = 30
+config_retention_day_table_script_run = 90
 
 # queue
 config_queue_services = ["postgres", "redis", "rabbitmq", "kafka", "celery"]
@@ -129,11 +127,6 @@ config_celery_url = None
 
 # webhook
 config_webhook_is_active = False
-config_webhook_timeout_sec = 10
-config_webhook_retry_max = 8
-config_webhook_retry_wait_sec = 60
-config_webhook_poll_sec = 5
-config_webhook_verify_tolerance_sec = 300
 config_webhook_verify_scheme = {
 "standard": {"header": "webhook-signature", "prefix": "v1,", "encoding": "base64", "signed": "{id}.{timestamp}.{body}", "id": {"header": "webhook-id"}, "timestamp": {"header": "webhook-timestamp"}, "secret_encoding": "base64"},
 "stripe": {"header": "Stripe-Signature", "key": "v1", "encoding": "hex", "signed": "{timestamp}.{body}", "timestamp": {"key": "t"}},
@@ -201,19 +194,14 @@ config_posthog_project_key = None
 # table
 config_table_exclude_from_users_delete = ["spatial_ref_sys", "users", "log_users_delete"]
 config_table_write_blocked = ["log_api", "log_users_password", "log_users_delete", "script_run", "queue_job", "otp", "spatial_ref_sys"]
-config_table_my_create_blocked = ["users", "api_key", "webhook", "ticket_comment", "log_api", "log_users_password", "otp", "script_run", "queue_job", "spatial_ref_sys"]
+config_table_my_create_blocked = ["users", "api_key", "webhook", "log_api", "log_users_password", "otp", "script_run", "queue_job", "spatial_ref_sys"]
 config_table_my_read_blocked = ["users", "config", "webhook", "log_users_password", "otp", "script_run", "queue_job", "spatial_ref_sys"]
 config_table_my_delete_all_allowed = ["test", "message", "notification"]
-config_table_public_create_allowed = ["test", "ticket"]
+config_table_public_create_allowed = ["test"]
 config_table_public_read_allowed = ["test"]
 config_table_private_read_allowed = ["test"]
 config_public_create_honeypot = "website"
 config_mongodb_my_create_allowed = {"test": ["post"]}
-
-# permission
-config_permission_table = {"ticket": {"read": 120, "update": 121, "delete": 122}, "ticket_comment": {"create": 123, "read": 124, "update": 125, "delete": 126}}
-config_permission_user_roles = []
-config_permission_user_column_blocked = ["role", "permissions", "totp_enabled_at", "username", "email", "mobile", "verified_at", "verified_by_id", "deactivated_by_id", "parent_id", "source", "id_ext", "oidc_google"]
 
 # column
 config_column_token_encode = ["id", "role", "username", "id_ext" ,"deactivated_at", "deleted_at", "permissions"]
@@ -247,7 +235,7 @@ config_options = {
 config_column_int_mapping = {
 "users": {
 "role": {1: "Admin"},
-"permissions": {61: "Create user", 62: "Update user", 86: "Postgres query runner write", 120: "Ticket read", 121: "Ticket update", 122: "Ticket delete", 123: "Ticket comment create", 124: "Ticket comment read", 125: "Ticket comment update", 126: "Ticket comment delete"},
+"permissions": {63: "/admin/sync", 64: "/admin/monitor", 65: "/admin/object-create", 66: "/admin/object-update", 67: "/admin/object-read", 68: "/admin/object-read-export", 69: "/admin/user-create", 70: "/admin/user-update", 71: "/admin/user-delete", 72: "/admin/object-delete", 73: "/admin/table-column-groupby", 74: "/admin/table-column-distinct", 75: "/admin/postgres-import", 76: "/admin/mongodb-import", 77: "/admin/blob-container-sas", 78: "/admin/blob-preview-urls", 79: "/admin/blob-container-read", 80: "/admin/blob-container-ops", 81: "/admin/blob-delete-url", 82: "/admin/postgres-info", 83: "/admin/postgres-schema", 84: "/admin/postgres-slow-queries", 85: "/admin/postgres-slow-queries-reset", 86: "/admin/postgres-query-runner-write", 87: "/admin/postgres-query-runner-read", 88: "/admin/postgres-query-runner-read-export", 89: "/admin/postgres-query-ai", 90: "/admin/mssql-query-runner-write", 91: "/admin/mssql-query-runner-read", 92: "/admin/mssql-query-runner-read-export", 93: "/admin/clickhouse-query-runner-write", 94: "/admin/clickhouse-query-runner-read", 95: "/admin/clickhouse-query-runner-read-export", 96: "/admin/clickhouse-query-ai", 101: "/admin/webhook-create"},
 },
 "blob": {
 "type": {1: "File", 2: "Presigned Url"},
@@ -257,11 +245,6 @@ config_column_int_mapping = {
 },
 "queue_job": {
 "status": {1: "Waiting", 2: "Failed"},
-},
-"ticket": {
-"type": {1: "Support", 2: "Feedback", 3: "Bug"},
-"priority": {1: "Low", 2: "Normal", 3: "High"},
-"status": {1: "New", 2: "In Progress", 3: "Blocked", 4: "Waiting", 5: "Done"},
 },
 "log_users_delete": {
 "type": {1: "User Soft Deleted", 2: "User Restored", 3: "User Hard Deleted"},
@@ -402,32 +385,6 @@ config_postgres_schema_master = {
 {"name":"reference_id","datatype":"bigint"},
 {"name":"read_at","datatype":"timestamptz"}
 ],
-"ticket":[
-{"name":"id","datatype":"bigint","identity":"always","is_primary": True},
-{"name":"created_at","datatype":"timestamptz","default":"now()","index":"btree(created_at)"},
-{"name":"created_by_id","datatype":"bigint","index":"btree(created_by_id,id)"},
-{"name":"updated_at","datatype":"timestamptz"},
-{"name":"updated_by_id","datatype":"bigint"},
-{"name":"type","datatype":"smallint","is_mandatory": True,"default":1,"in":(1,2,3),"index":"btree(type,id)"},
-{"name":"priority","datatype":"smallint","is_mandatory": True,"default":2,"in":(1,2,3),"index":"btree(priority,id)"},
-{"name":"status","datatype":"smallint","is_mandatory": True,"default":1,"in":(1,2,3,4,5),"index":"btree(status,id)"},
-{"name":"title","datatype":"text","is_mandatory": True,"index":"gin_trgm(title)"},
-{"name":"description","datatype":"text"},
-{"name":"name","datatype":"text","index":"gin_trgm(name)"},
-{"name":"email","datatype":"text","index":"gin_trgm(email)"},
-{"name":"mobile","datatype":"text","index":"gin_trgm(mobile)"},
-{"name":"closed_at","datatype":"timestamptz"},
-{"name":"search","datatype":"tsvector","generated":"setweight(to_tsvector('english', coalesce(title, '')), 'A') || setweight(to_tsvector('english', coalesce(description, '')), 'B')","index":"gin(search)"}
-],
-"ticket_comment":[
-{"name":"id","datatype":"bigint","identity":"always","is_primary": True},
-{"name":"created_at","datatype":"timestamptz","default":"now()"},
-{"name":"created_by_id","datatype":"bigint","is_mandatory": True,"index":"btree(created_by_id,id)"},
-{"name":"updated_at","datatype":"timestamptz"},
-{"name":"updated_by_id","datatype":"bigint"},
-{"name":"ticket_id","datatype":"bigint","is_mandatory": True,"index":"btree(ticket_id,id)"},
-{"name":"description","datatype":"text","is_mandatory": True}
-],
 "log_api":[
 {"name":"id","datatype":"bigint","identity":"always","is_primary": True},
 {"name":"created_at","datatype":"timestamptz","default":"now()","index":"btree(created_at)"},
@@ -524,9 +481,7 @@ config_postgres_schema_master = {
 "table_row_delete_disable_bulk":[["users", 100]],
 },
 "sql":{
-"ticket_closed_at":"CREATE OR REPLACE FUNCTION ticket_closed_at() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.status = 5 THEN NEW.closed_at = CASE WHEN TG_OP = 'UPDATE' AND OLD.status = 5 THEN OLD.closed_at ELSE now() END; ELSE NEW.closed_at = NULL; END IF; RETURN NEW; END $$; CREATE OR REPLACE TRIGGER ticket_closed_at BEFORE INSERT OR UPDATE OF status ON ticket FOR EACH ROW EXECUTE FUNCTION ticket_closed_at();",
 "users_totp_clear":"CREATE OR REPLACE FUNCTION users_totp_clear() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN IF NEW.totp_enabled_at IS NULL AND OLD.totp_enabled_at IS NOT NULL THEN NEW.totp_secret = NULL; NEW.totp_last_step = NULL; NEW.totp_recovery = NULL; END IF; RETURN NEW; END $$; CREATE OR REPLACE TRIGGER users_totp_clear BEFORE UPDATE OF totp_enabled_at ON users FOR EACH ROW EXECUTE FUNCTION users_totp_clear();",
-"ticket_delete_comments":"CREATE OR REPLACE FUNCTION ticket_delete_comments() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN DELETE FROM ticket_comment WHERE ticket_id = OLD.id; RETURN OLD; END $$; CREATE OR REPLACE TRIGGER ticket_delete_comments AFTER DELETE ON ticket FOR EACH ROW EXECUTE FUNCTION ticket_delete_comments();",
 },
 }
 
@@ -601,50 +556,42 @@ config_api = {
 "/private/user-read": {"id": 56, "auth": ["jwt"], "is_connection_param": True},
 "/private/table-column-groupby": {"id": 57, "auth": ["jwt"], "cache": {"mode": "inmemory", "ttl_sec": 10, "is_per_user": False}, "is_connection_param": True},
 "/private/table-column-distinct": {"id": 58, "auth": ["jwt"], "cache": {"mode": "inmemory", "ttl_sec": 10, "is_per_user": False}, "is_connection_param": True},
-# permission
-"/permission/object-create": {"id": 98, "auth": ["jwt"], "user_check_permission": {"mode": "token", "action": "create"}},
-"/permission/object-read": {"id": 99, "auth": ["jwt"], "user_check_permission": {"mode": "token", "action": "read"}, "is_connection_param": True},
-"/permission/object-read-export": {"id": 100, "auth": ["jwt"], "user_check_permission": {"mode": "token", "action": "read"}, "is_connection_param": True},
-"/permission/object-update": {"id": 59, "auth": ["jwt"], "user_check_permission": {"mode": "token", "action": "update"}},
-"/permission/object-delete": {"id": 60, "auth": ["jwt"], "user_check_permission": {"mode": "token", "action": "delete"}, "rate_limit": {"mode": "inmemory", "limit": 10, "window_sec": 60}},
-"/permission/user-create": {"id": 61, "auth": ["jwt"], "user_check_permission": {"mode": "token"}, "rate_limit": {"mode": "inmemory", "limit": 10, "window_sec": 60}},
-"/permission/user-update": {"id": 62, "auth": ["jwt"], "user_check_permission": {"mode": "token"}, "rate_limit": {"mode": "inmemory", "limit": 10, "window_sec": 60}},
 # admin
-"/admin/sync": {"id": 63, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}},
-"/admin/monitor": {"id": 64, "auth": ["jwt"], "user_check_role": {"mode": "token", "roles": [1]}, "is_log_api": False, "is_connection_param": True},
-"/admin/object-create": {"id": 65, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}, "is_connection_param": True},
-"/admin/object-update": {"id": 66, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}, "is_connection_param": True},
-"/admin/object-read": {"id": 67, "auth": ["jwt"], "user_check_role": {"mode": "token", "roles": [1]}, "is_connection_param": True},
-"/admin/object-read-export": {"id": 68, "auth": ["jwt"], "user_check_role": {"mode": "token", "roles": [1]}, "is_connection_param": True},
-"/admin/user-create": {"id": 69, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
-"/admin/user-update": {"id": 70, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
-"/admin/user-delete": {"id": 71, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "rate_limit": {"mode": "inmemory", "limit": 10, "window_sec": 60}, "user_check_deactivated": {"mode": "realtime"}},
-"/admin/object-delete": {"id": 72, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "user_check_deleted": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 10, "window_sec": 60}, "is_connection_param": True},
-"/admin/table-column-groupby": {"id": 73, "auth": ["jwt"], "user_check_role": {"mode": "token", "roles": [1]}, "cache": {"mode": "inmemory", "ttl_sec": 10, "is_per_user": False}, "is_connection_param": True},
-"/admin/table-column-distinct": {"id": 74, "auth": ["jwt"], "user_check_role": {"mode": "token", "roles": [1]}, "cache": {"mode": "inmemory", "ttl_sec": 10, "is_per_user": False}, "is_connection_param": True},
-"/admin/postgres-import": {"id": 75, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "is_connection_param": True, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
-"/admin/mongodb-import": {"id": 76, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
-"/admin/blob-container-sas": {"id": 77, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
-"/admin/blob-preview-urls": {"id": 78, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}},
-"/admin/blob-container-read": {"id": 79, "auth": ["jwt"], "user_check_role": {"mode": "inmemory", "roles": [1]}},
-"/admin/blob-container-ops": {"id": 80, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
-"/admin/blob-delete-url": {"id": 81, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
-"/admin/postgres-info": {"id": 82, "auth": ["jwt"], "user_check_role": {"mode": "token", "roles": [1]}, "cache": {"mode": "inmemory", "ttl_sec": 300, "is_per_user": False}, "is_connection_param": True},
-"/admin/postgres-schema": {"id": 83, "auth": ["jwt"], "user_check_role": {"mode": "token", "roles": [1]}, "is_connection_param": True},
-"/admin/postgres-slow-queries": {"id": 84, "auth": ["jwt"], "user_check_role": {"mode": "token", "roles": [1]}, "is_connection_param": True},
-"/admin/postgres-slow-queries-reset": {"id": 85, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "is_connection_param": True, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
-"/admin/postgres-query-runner-write": {"id": 86, "is_active": True, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_permission": {"mode": "realtime"}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
-"/admin/postgres-query-runner-read": {"id": 87, "auth": ["jwt"], "user_check_role": {"mode": "token", "roles": [1]}, "is_connection_param": True},
-"/admin/postgres-query-runner-read-export": {"id": 88, "auth": ["jwt"], "user_check_role": {"mode": "inmemory", "roles": [1]}, "is_connection_param": True},
-"/admin/postgres-query-ai": {"id": 89, "auth": ["jwt"], "user_check_role": {"mode": "token", "roles": [1]}, "is_connection_param": True},
-"/admin/mssql-query-runner-write": {"id": 90, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
-"/admin/mssql-query-runner-read": {"id": 91, "auth": ["jwt"], "user_check_role": {"mode": "token", "roles": [1]}},
-"/admin/mssql-query-runner-read-export": {"id": 92, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}},
-"/admin/clickhouse-query-runner-write": {"id": 93, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
-"/admin/clickhouse-query-runner-read": {"id": 94, "auth": ["jwt"], "user_check_role": {"mode": "token", "roles": [1]}},
-"/admin/clickhouse-query-runner-read-export": {"id": 95, "auth": ["jwt"], "user_check_role": {"mode": "inmemory", "roles": [1]}},
-"/admin/clickhouse-query-ai": {"id": 96, "auth": ["jwt"], "user_check_role": {"mode": "token", "roles": [1]}},
-"/admin/webhook-create": {"id": 101, "auth": ["jwt"], "user_check_role": {"mode": "realtime", "roles": [1]}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
+"/admin/sync": {"id": 63, "auth": ["jwt"], "user_check_permission": {"mode": "realtime"}},
+"/admin/monitor": {"id": 64, "auth": ["jwt"], "user_check_permission": {"mode": "token"}, "is_log_api": False, "is_connection_param": True},
+"/admin/object-create": {"id": 65, "auth": ["jwt"], "user_check_permission": {"mode": "realtime"}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}, "is_connection_param": True},
+"/admin/object-update": {"id": 66, "auth": ["jwt"], "user_check_permission": {"mode": "realtime"}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}, "is_connection_param": True},
+"/admin/object-read": {"id": 67, "auth": ["jwt"], "user_check_permission": {"mode": "token"}, "is_connection_param": True},
+"/admin/object-read-export": {"id": 68, "auth": ["jwt"], "user_check_permission": {"mode": "token"}, "is_connection_param": True},
+"/admin/user-create": {"id": 69, "auth": ["jwt"], "user_check_permission": {"mode": "realtime"}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
+"/admin/user-update": {"id": 70, "auth": ["jwt"], "user_check_permission": {"mode": "realtime"}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
+"/admin/user-delete": {"id": 71, "auth": ["jwt"], "user_check_permission": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 10, "window_sec": 60}, "user_check_deactivated": {"mode": "realtime"}},
+"/admin/object-delete": {"id": 72, "auth": ["jwt"], "user_check_permission": {"mode": "realtime"}, "user_check_deactivated": {"mode": "realtime"}, "user_check_deleted": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 10, "window_sec": 60}, "is_connection_param": True},
+"/admin/table-column-groupby": {"id": 73, "auth": ["jwt"], "user_check_permission": {"mode": "token"}, "cache": {"mode": "inmemory", "ttl_sec": 10, "is_per_user": False}, "is_connection_param": True},
+"/admin/table-column-distinct": {"id": 74, "auth": ["jwt"], "user_check_permission": {"mode": "token"}, "cache": {"mode": "inmemory", "ttl_sec": 10, "is_per_user": False}, "is_connection_param": True},
+"/admin/postgres-import": {"id": 75, "auth": ["jwt"], "user_check_permission": {"mode": "realtime"}, "is_connection_param": True, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
+"/admin/mongodb-import": {"id": 76, "auth": ["jwt"], "user_check_permission": {"mode": "realtime"}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
+"/admin/blob-container-sas": {"id": 77, "auth": ["jwt"], "user_check_permission": {"mode": "realtime"}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
+"/admin/blob-preview-urls": {"id": 78, "auth": ["jwt"], "user_check_permission": {"mode": "realtime"}},
+"/admin/blob-container-read": {"id": 79, "auth": ["jwt"], "user_check_permission": {"mode": "token"}},
+"/admin/blob-container-ops": {"id": 80, "auth": ["jwt"], "user_check_permission": {"mode": "realtime"}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
+"/admin/blob-delete-url": {"id": 81, "auth": ["jwt"], "user_check_permission": {"mode": "realtime"}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
+"/admin/postgres-info": {"id": 82, "auth": ["jwt"], "user_check_permission": {"mode": "token"}, "cache": {"mode": "inmemory", "ttl_sec": 300, "is_per_user": False}, "is_connection_param": True},
+"/admin/postgres-schema": {"id": 83, "auth": ["jwt"], "user_check_permission": {"mode": "token"}, "is_connection_param": True},
+"/admin/postgres-slow-queries": {"id": 84, "auth": ["jwt"], "user_check_permission": {"mode": "token"}, "is_connection_param": True},
+"/admin/postgres-slow-queries-reset": {"id": 85, "auth": ["jwt"], "user_check_permission": {"mode": "realtime"}, "is_connection_param": True, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
+"/admin/postgres-query-runner-write": {"id": 86, "is_active": True, "auth": ["jwt"], "user_check_permission": {"mode": "realtime"}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
+"/admin/postgres-query-runner-read": {"id": 87, "auth": ["jwt"], "user_check_permission": {"mode": "token"}, "is_connection_param": True},
+"/admin/postgres-query-runner-read-export": {"id": 88, "auth": ["jwt"], "user_check_permission": {"mode": "token"}, "is_connection_param": True},
+"/admin/postgres-query-ai": {"id": 89, "auth": ["jwt"], "user_check_permission": {"mode": "token"}, "is_connection_param": True},
+"/admin/mssql-query-runner-write": {"id": 90, "auth": ["jwt"], "user_check_permission": {"mode": "realtime"}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
+"/admin/mssql-query-runner-read": {"id": 91, "auth": ["jwt"], "user_check_permission": {"mode": "token"}},
+"/admin/mssql-query-runner-read-export": {"id": 92, "auth": ["jwt"], "user_check_permission": {"mode": "realtime"}},
+"/admin/clickhouse-query-runner-write": {"id": 93, "auth": ["jwt"], "user_check_permission": {"mode": "realtime"}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
+"/admin/clickhouse-query-runner-read": {"id": 94, "auth": ["jwt"], "user_check_permission": {"mode": "token"}},
+"/admin/clickhouse-query-runner-read-export": {"id": 95, "auth": ["jwt"], "user_check_permission": {"mode": "token"}},
+"/admin/clickhouse-query-ai": {"id": 96, "auth": ["jwt"], "user_check_permission": {"mode": "token"}},
+"/admin/webhook-create": {"id": 101, "auth": ["jwt"], "user_check_permission": {"mode": "realtime"}, "user_check_deactivated": {"mode": "realtime"}, "rate_limit": {"mode": "inmemory", "limit": 60, "window_sec": 60}},
 }
 
 # override

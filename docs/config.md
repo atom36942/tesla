@@ -199,7 +199,7 @@ Disabled (`None`) by default; activated automatically when connection credential
 | `config_is_prod` | Boolean production-mode toggle (`True` disables debug and protects endpoints) |
 | `config_is_log_api` | API logging to `log_api` (default `True`). `False` (`config_is_log_api=false` in `.env`) turns it off: no rows are written, cleanup skips it, the Monitor's Requests and Errors tabs say logging is off and `/my/api-usage` returns 503. Only routes in `config_api` are logged; to skip some of them, set `"is_log_api": False` on them (Atom does for the pages `/` and `/page/{name}`, the health checks and `/pgweb`). |
 | `config_is_log_api_all` | Also log requests that are not a `config_api` route: static files, `/favicon.ico`, unknown paths and their 404s (default `False`, which keeps them out of `log_api`). Set `True` to see all traffic while debugging. |
-| `config_is_log_api_detail` | Also store each logged request's headers, the response headers and both bodies in `log_api` (`request_header`, `response_header`, `request_body`, `response_body`; default `False`). Only text bodies are kept, by their `Content-Type`: JSON (`application/json`, `+json`), XML (`application/xml`, `+xml`), `text/*` and `multipart/mixed`; CSV exports, event streams, forms, uploads, files and compressed bodies are only named (`[skipped: text/csv, 52311 bytes]`), never copied. `query_param` keeps every value. Secret header and query names are always masked (`Authorization`, `Cookie`, `Set-Cookie`, keys, tokens); bodies are stored as sent unless `config_is_log_api_detail_mask` is on. For debugging: rows get much larger, and bodies hold users' data; lower `config_retention_day_log_api` while it is on (it deletes them with the rest). |
+| `config_is_log_api_detail` | Also store each logged request's headers, the response headers and both bodies in `log_api` (`request_header`, `response_header`, `request_body`, `response_body`; default `False`). Only text bodies are kept, by their `Content-Type`: JSON (`application/json`, `+json`), XML (`application/xml`, `+xml`), `text/*` and `multipart/mixed`; CSV exports, event streams, forms, uploads, files and compressed bodies are only named (`[skipped: text/csv, 52311 bytes]`), never copied. `query_param` keeps every value. Secret header and query names are always masked (`Authorization`, `Cookie`, `Set-Cookie`, keys, tokens); bodies are stored as sent unless `config_is_log_api_detail_mask` is on. For debugging: rows get much larger, and bodies hold users' data; lower `config_retention_day_table_log_api` while it is on (it deletes them with the rest). |
 | `config_log_api_detail_max_kb` | The most kept per body with `config_is_log_api_detail` (`64`); a longer body is cut and marked with its full size. |
 | `config_is_log_api_detail_mask` | With `config_is_log_api_detail`, also mask secrets inside the bodies: JSON fields and XML elements named password, token, OTP, secret or key become `[REDACTED]` (`False`, for speed: about 2-5 ms per 64 KB body, after the reply is sent). Turn it on when the bodies carry credentials. |
 | `config_postgres_db_log_api` | Named Postgres database for API logging (default: `master`); its `config_postgres_schema_<name>` holds `log_api` |
@@ -223,19 +223,18 @@ Disabled (`None`) by default; activated automatically when connection credential
 | `config_totp_issuer` | The app's name in the authenticator app (default `None`: the master database name) |
 | `config_oidc_provider` | Single sign-on providers, `{name: {issuer, client_id, jwks_uri?, tenants?, link_email?}}` (JSON in `.env`); each adds the users column `oidc_<name>`. `{}` (default): `/auth/login-oidc` answers "OIDC not configured" ([auth-oidc.md](auth-oidc.md)) |
 | `config_schedule_timezone` | Time zone of every `config_schedule_*` time (`UTC`; a zone name such as `Asia/Kolkata`) ([schedule.md](schedule.md)) |
-| `config_schedule_check_sec` | How often scheduled scripts are checked, in seconds (`600`; 60 to 3600) |
 | `config_schedule_script_<script>` | When `script/<script>.py` or `script_extend/<script>.py` runs by itself: `off`, `every 6h`, `daily 02:00`, `every 3d 02:00`, `weekly sun 02:00` or `monthly 1 02:00`. Atom's: `config_schedule_script_postgres_cleanup` (`every 1h`), `config_schedule_script_postgres_backup` (`off`) ([schedule.md](schedule.md)) |
-| `config_retention_day_otp` | OTP row retention in days (`1`); `None` skips it. Must exceed OTP expiry. Deleted by `script/postgres_cleanup.py` on `config_schedule_script_postgres_cleanup` |
-| `config_retention_day_log_api` | API-log row retention in days (`7`); `None` skips it. Deleted by `script/postgres_cleanup.py` on `config_schedule_script_postgres_cleanup` |
-| `config_retention_day_script_run` | Days a finished `script_run` row is kept (`90`); `None` keeps them. Deleted by `script/postgres_cleanup.py` on `config_schedule_script_postgres_cleanup`; a run still going is never deleted |
-| `config_retention_day_users_delete` | Days before soft-deleted users' data is purged by `script/worker_users_delete.py` (`30`) |
+| `config_retention_day_table_otp` | OTP row retention in days (`1`); `None` skips it. Must exceed OTP expiry. Deleted by `script/postgres_cleanup.py` on `config_schedule_script_postgres_cleanup` |
+| `config_retention_day_table_log_api` | API-log row retention in days (`7`); `None` skips it. Deleted by `script/postgres_cleanup.py` on `config_schedule_script_postgres_cleanup` |
+| `config_retention_day_table_script_run` | Days a finished `script_run` row is kept (`90`); `None` keeps them. Deleted by `script/postgres_cleanup.py` on `config_schedule_script_postgres_cleanup`; a run still going is never deleted |
+| `config_retention_day_user_soft_deleted` | Days before soft-deleted users' data is purged by `script/worker_users_delete.py` (`30`) |
 | `config_access_token_expires_sec` | JWT Access Token lifetime in seconds |
 | `config_refresh_token_expires_sec` | JWT Refresh Token lifetime in seconds |
 | `config_api_key_max` | API keys one user may hold (`20`) ([auth.md](auth-api-key.md)) |
 | `config_api_key_cache_sec` | Seconds a resolved API key is reused per worker before it is read again (`60`), in the same cache as tokens (`config_token_cache_max`); a deleted key keeps working for at most this long. `0` reads the database on every request |
 | `config_cache_row_limit_config` | Rows of the `config` table (key → value) loaded into `cache_config` at startup and by `/admin/sync` (`1000`); `0` = not loaded |
 | `config_cache_row_limit_users_role`, `config_cache_row_limit_users_deactivated`, `config_cache_row_limit_users_deleted` | Users (lowest ids first) whose role, `deactivated_at` and `deleted_at` are loaded at startup and by `/admin/sync` for the `inmemory` user checks (`10000` each, about 1 MB in all); a user not loaded is read from the database. `0` = not loaded (a project that never uses `inmemory` checks can turn them off). Set them in `.env` like any number |
-| `config_token_cache_max` | Verified tokens cached per worker (`10000`, about 1 KB each); `0` turns the cache off. A token is fully verified on first use, then reused until its own `exp`; the key is the whole signed token, so an edited token is verified again. Expired entries are swept every `config_inmemory_cache_cleanup_auto_sec`; when full, the oldest entry is dropped |
+| `config_token_cache_max` | Verified tokens cached per worker (`10000`, about 1 KB each); `0` turns the cache off. A token is fully verified on first use, then reused until its own `exp`; the key is the whole signed token, so an edited token is verified again. Expired entries are swept every 5 minutes; when full, the oldest entry is dropped |
 | `config_request_body_max_kb` | Largest request body in KB, except multipart uploads (`10240`, 10 MB); a bigger one gets `413` before it is read, since a JSON body is held in memory and parsing takes several times its size |
 | `config_request_form_max_kb` | Largest multipart upload (`multipart/form-data`) in KB, all files and fields together (`102400`, 100 MB; files go to disk past 1 MB); a bigger one gets `413` |
 | `config_blob_limit_size_kb` | Maximum file upload size in KB (default: `500`) |
@@ -248,7 +247,6 @@ Disabled (`None`) by default; activated automatically when connection credential
 | `config_postgres_buffer_flush_auto_sec` | Timer interval in seconds to auto-flush write buffers (`60`) |
 | `config_postgres_buffer_flush_auto_sec_<name>` | The same for one database's buffered rows (`config_postgres_url_<name>` must exist), e.g. `2` for device data while master keeps `60` ([database.md](database.md#periodic-background-flush-loop)) |
 | `config_api_cache_inmemory_max_kb` | Largest total size, in KB, of the `inmemory` API response cache per worker, counting the stored (gzipped) bodies (`102400`, 100 MB); over it, the oldest entries are dropped and read from the route again on their next request |
-| `config_inmemory_cache_cleanup_auto_sec` | Timer interval in seconds to purge expired cache entries (`300`) |
 | `config_batch_item_limit` | Maximum objects allowed per batch CRUD request, `/admin/user-update` included (`1000`) |
 | `config_sql_read_limit_default` | Default page size for object read queries (`100`) |
 | `config_sql_read_limit_max` | Hard cap limit for object read page size (`10000`) |
@@ -279,20 +277,10 @@ Disabled (`None`) by default; activated automatically when connection credential
 | `config_table_my_read_blocked` | Tables refused on user `/my/object-read` endpoint |
 | `config_table_my_delete_all_allowed` | Tables supporting `/my/object-delete-all` through any column in `config_column_ownership_delete` that exists in the table; defaults to `created_by_id` |
 | `config_table_public_create_allowed` | Tables accessible on unauthenticated public create route |
-| `config_public_create_honeypot` | Hidden form field (`"website"`) that only bots fill: `/public/object-create` refuses a row where it has a value and drops it when empty; `None` turns it off |
+| `config_public_create_honeypot` | Hidden form field (`"website"`) that only bots fill: `/public/object-create` refuses a row where it has a value and drops it when empty; the form adds it off-screen with `tabindex="-1"` and `autocomplete="off"`; `None` turns it off |
 | `config_table_public_read_allowed` | Tables accessible on unauthenticated public read route |
 | `config_mongodb_my_create_allowed` | MongoDB collections writable on `/my/object-create-mongodb`, as `{database: [collection, ...]}`; empty disables the route |
 | `config_table_private_read_allowed` | Tables accessible on authenticated private read route |
-
-### Permission Routes
-
-The `/permission/*` routes' settings, together as `config_permission_*` (the routes themselves need a permission; see [auth](auth.md)).
-
-| Key | Description |
-|---|---|
-| `config_permission_table` | The tables the `/permission/object-*` routes reach and the permission id each action needs: `{table: {"create"|"read"|"update"|"delete": id}}`; Atom's `ticket` (read 120, update 121, delete 122) and `ticket_comment` (create 123, read 124, update 125, delete 126). A missing table or action is refused; every id labelled in `config_column_int_mapping["users"]["permissions"]`, used once and by no route; never `users` |
-| `config_permission_user_roles` | Roles the `/permission` user routes may act on (default `[]`: none): the role `/permission/user-create` may give, and the role of the user `/permission/user-update` may change. Roles from 2 only; startup refuses role 1. Renamed from `config_permission_user_create_roles` in 14.0.0 |
-| `config_permission_user_column_blocked` | `users` columns `/permission/user-update` refuses (`role`, `permissions`, the login ones `username`, `email`, `mobile`, ...); every other column, `password` and `deactivated_at` included, may change. Startup refuses a list without `role` and `permissions` |
 
 ### Column Rules
 
@@ -319,13 +307,8 @@ The `/permission/*` routes' settings, together as `config_permission_*` (the rou
 | `config_queue_concurrency` | Jobs a consumer runs at once (default 10) |
 | `config_queue_retry_max` | Retries of a failed job before it is kept (Postgres: `status` 2 in `queue_job`; brokers: `<channel>_failed`) (default 3) |
 | `config_queue_retry_wait_sec` | Wait before the first retry, doubled each time: 2, 4, 8 s (default 2) |
-| `config_webhook_is_active` | Runs the webhook delivery loop in the app, one per worker (default `False`) ([webhook.md](webhook.md)) |
-| `config_webhook_timeout_sec` | Seconds a receiver has to answer one delivery (default 10) |
-| `config_webhook_retry_max` | Retries of a failed delivery before it is kept as failed (`status` 2 in `queue_job`) (default 8) |
-| `config_webhook_retry_wait_sec` | Wait before a delivery's first retry, doubled each time: 60 s, 2 min, 4 min… (default 60) |
-| `config_webhook_poll_sec` | Seconds the delivery loop waits when nothing is due (default 5) |
+| `config_webhook_is_active` | Runs the webhook delivery loop in the app, one per worker (default `False`); timing is fixed: 10 s per delivery, 8 retries from 60 s doubling, 300 s signature tolerance ([webhook.md](webhook.md)) |
 | `config_webhook_verify_scheme` | How each provider signs incoming webhooks: `standard`, `stripe`, `github`, `shopify`, `razorpay`; a project adds its own (`{**base, "acme": {...}}`), checked at startup ([webhook.md](webhook.md#schemes-are-data)) |
-| `config_webhook_verify_tolerance_sec` | Seconds an incoming webhook's timestamp may be off before it is refused as a replay (default 300) |
 | `config_blob_services` | Registered blob storage providers (`s3`, `azure`) |
 | `config_email_services` | Registered email providers (`ses`, `resend`, `azure`) |
 | `config_mobile_services` | Registered SMS providers (`sns`, `fast2sms`, `azure`) |
@@ -515,7 +498,7 @@ Permission IDs are integers in Python, but JSON object keys are strings: clients
 
 `script/postgres_cleanup.py` runs on `config_schedule_script_postgres_cleanup` (every hour by default, [schedule.md](schedule.md)) and permanently deletes only rows older than each retention cutoff, in batches of up to 5,000 with 0.1-second pauses, until none are left; each run is a row in `script_run`. OTP and `script_run` rows are in the master database (`script_run` keeps a run still going, whatever its age); API logs in the database `config_postgres_db_log_api` names, and only while `config_is_log_api` is on. Successful OTP verification still deletes its code immediately; expiry alone does not delete it. `config_schedule_script_postgres_cleanup = "off"` stops both; a retention of `None` stops one.
 
-#### Sizing `config_retention_day_log_api`
+#### Sizing `config_retention_day_table_log_api`
 
 Atom writes one `log_api` row per request, so the table holds roughly requests per day × retention days. Rows take about 150–200 bytes plus indexes:
 
@@ -525,6 +508,6 @@ Atom writes one `log_api` row per request, so the table holds roughly requests p
 | 1M requests/day | 7M | ~2.5 GB |
 | 10M requests/day | 70M | ~25 GB |
 
-The default of 7 days covers the Monitor page's longest range and keeps the table small. `/my/api-usage?days=N` reads this table, so users see at most that many days; for audits or problems found weeks later, raise it in `config_extend.py` or `.env` (for example `config_retention_day_log_api=30`). For high traffic, also consider keeping logs off the main database with `config_postgres_db_log_api` pointing at a separate `config_postgres_url_<name>`. Load tests create log rows too; they are removed once they pass the retention cutoff.
+The default of 7 days covers the Monitor page's longest range and keeps the table small. `/my/api-usage?days=N` reads this table, so users see at most that many days; for audits or problems found weeks later, raise it in `config_extend.py` or `.env` (for example `config_retention_day_table_log_api=30`). For high traffic, also consider keeping logs off the main database with `config_postgres_db_log_api` pointing at a separate `config_postgres_url_<name>`. Load tests create log rows too; they are removed once they pass the retention cutoff.
 
 Both tables have a `created_at` index in the schema configuration. When `config_postgres_db_log_api` is not `master`, `log_api` moves into that database's `config_postgres_schema_<name>` and out of master's ([database.md](database.md#5-api-logging--telemetry-log_api)); startup stops while it is missing there or left in another schema. A retention of `None` means no cleanup queries for that table. Deleted space can be reused by PostgreSQL after vacuuming; deletion does not necessarily shrink the database files on disk.

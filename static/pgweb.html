@@ -25,6 +25,7 @@ try{if(JSON.parse(localStorage.getItem('pgweb')||'{}').theme==='dark')document.d
   --sql-comment:#7b8b78; --sql-param:#1769aa; --sql-type:#9b4d96; --sql-fn:#006d77;
   --apply-bg:#edf7e7; --apply-border:#9fc783; --cancel-bg:#f1eef5; --cancel-border:#c4b8d1;
   --filter-bg:#f6f4f8; --grid-edge:#c8c8c8;
+  --canvas:#eceef2; --card-line:#d3d7de; --card-shadow:0 1px 3px rgba(16,24,40,.08),0 1px 2px rgba(16,24,40,.05); --th-bg:#f4f5f7;    /* cards (grid, row panel, editor) on a grey backdrop */
   --row-h:30px; --bar-h:50px; --side-w:240px;
 }
 :root[data-theme=dark]{
@@ -42,6 +43,7 @@ try{if(JSON.parse(localStorage.getItem('pgweb')||'{}').theme==='dark')document.d
   --sql-comment:#71806f; --sql-param:#82aaff; --sql-type:#ffcb6b; --sql-fn:#80cbc4;
   --apply-bg:#24351f; --apply-border:#577a45; --cancel-bg:#292530; --cancel-border:#574c63;
   --filter-bg:#1d1a22; --grid-edge:#484852;
+  --canvas:#060709; --card-line:#2b3038; --card-shadow:0 1px 3px rgba(0,0,0,.55),0 1px 2px rgba(0,0,0,.4); --th-bg:#13161b;
 }
 /* light is the default regardless of OS preference — dark is opt-in via the toggle */
 
@@ -62,6 +64,10 @@ button.primary:hover:not(:disabled){background:var(--green-h);border-color:var(-
 input,select,textarea{background:var(--bg);border:1px solid var(--line);border-radius:3px;
   padding:4px 8px;outline:none}
 input:focus,select:focus,textarea:focus{border-color:#999}
+:root{--arrow:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")}
+:root[data-theme=dark]{--arrow:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23aaaaaa' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E")}
+select,.fd-col{appearance:none;-webkit-appearance:none;-moz-appearance:none;padding-right:28px;cursor:pointer;
+  background-image:var(--arrow);background-repeat:no-repeat;background-position:right 10px center;background-size:11px 11px}    /* every dropdown: one chevron, 10px from the edge */
 input[type="search"]::-webkit-search-cancel-button{cursor:pointer;margin-left:6px;position:relative;right:-2px}
 ::-webkit-scrollbar{width:11px;height:11px}
 ::-webkit-scrollbar-thumb{background:#c7c7c7;border-radius:6px;border:3px solid var(--bg)}
@@ -70,8 +76,8 @@ input[type="search"]::-webkit-search-cancel-button{cursor:pointer;margin-left:6p
 
 /* ==== shell: always present, empty until connected ==== */
 #app{display:flex;flex:1;min-width:0}
-#side{width:var(--side-w,240px);flex:0 0 var(--side-w,240px);background:var(--side);display:flex;flex-direction:column;min-height:0;
-  border-right:1px solid var(--line);position:relative}
+#side{width:var(--side-w,240px);flex:0 0 var(--side-w,240px);background:var(--canvas);display:flex;flex-direction:column;min-height:0;
+  position:relative}    /* no edge line: the sidebar and the views share one backdrop, and the cards carry their own borders */
 #side.collapsed{display:none!important}
 #dbline{height:var(--bar-h);flex:none;background:var(--nav);color:#fff;position:relative;z-index:11;
   display:flex;justify-content:space-between;align-items:center;padding:0 8px 0 12px;min-width:0;
@@ -97,27 +103,27 @@ input[type="search"]::-webkit-search-cancel-button{cursor:pointer;margin-left:6p
 #dlg-b .db-url-row{display:flex;align-items:center;gap:8px}
 #dlg-b .db-url{flex:1;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:6px;font-family:ui-monospace,Menlo,Consolas,monospace;font-size:12px;color:var(--dim);overflow-wrap:anywhere;user-select:all}
 
-#sidetabs{display:flex;padding:8px 8px 5px;gap:4px;background:var(--side);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+#sidetabs{display:flex;gap:2px;margin:8px;padding:3px;background:var(--bg);border:1px solid var(--card-line);border-radius:7px;box-shadow:var(--card-shadow)}    /* a segmented control: the kinds in one track */
 #sidetabs[hidden]{display:none!important}
-.side-tab{flex:1 0 auto;text-align:center;padding:4px 7px;font-size:11.5px;font-weight:500;border-radius:4px;
-  border:1px solid transparent;background:transparent;color:var(--dim);cursor:pointer;white-space:nowrap;
-  user-select:none;transition:background .15s ease,color .15s ease,border-color .15s ease}
-.side-tab:hover{color:var(--fg);background:var(--hl)}
-.side-tab .side-count{margin-left:3px;font-weight:400;color:var(--dim)}
-.side-tab.on{background:var(--bg);color:var(--fg);font-weight:600;border-color:var(--line);
-  box-shadow:0 1px 2px rgba(0,0,0,.04)}
-:root[data-theme=dark] .side-tab.on{background:#22222a;color:#fff;border-color:var(--line)}
+.side-tab{flex:1 0 auto;display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:5px 8px;font-size:11.5px;font-weight:500;border-radius:5px;
+  border:0;background:transparent;color:var(--fg);cursor:pointer;white-space:nowrap;user-select:none;transition:background-color .1s ease-out,color .1s ease-out,box-shadow .1s ease-out}    /* a quick fade: smooth, never sluggish */
+#sidetabs .side-tab:hover:not(.on){background:color-mix(in srgb,var(--sel) 12%,transparent);border-color:transparent}    /* a faint tint of the selection colour, never white; the id outranks the general button:hover */
+#sidetabs .side-tab.on,#sidetabs .side-tab.on:hover{background:var(--sel);color:var(--sel-fg);font-weight:700;border-color:transparent;box-shadow:0 1px 3px rgba(0,0,0,.18)}    /* the open kind: a solid pill in the selection colour, as the open table is marked */
 
-#side .search{height:40px;padding:0 12px;position:relative;background:var(--bg);border-bottom:1px solid var(--line)}
-#side .search:focus-within{background:var(--hl)}
-#side .search input{width:100%;height:39px;padding:0 26px 0 0;border:0;border-radius:0;background:transparent;
-  box-shadow:none;font-size:12px}
-#side .search input:focus{border:0;box-shadow:none}
-#qclr{position:absolute;right:10px;top:10px;width:20px;height:20px;padding:0;line-height:17px;
-  text-align:center;border-radius:50%;font-size:14px;color:var(--dim);border-color:transparent;background:transparent}
-#qclr:hover:not(:disabled){background:var(--hl);color:var(--fg);border-color:transparent}
+/* the sidebar as a card on the backdrop, like the grid and the row panel: the list, its count, then the search at the bottom */
+#sidecard{flex:1;min-height:0;display:flex;flex-direction:column;margin:0 8px 8px;background:var(--bg);border:1px solid var(--card-line);border-radius:6px;box-shadow:var(--card-shadow);overflow:hidden}
+#sidecard:not(:has(> :not([hidden]))){display:none}    /* nothing to show before connecting */
+#side .search{flex:none;padding:6px 8px 8px;position:relative;background:var(--th-bg)}
+#side .search input{width:100%;height:30px;padding:0 28px 0 28px;border:1px solid var(--line);border-radius:5px;background:var(--bg);box-shadow:none;font-size:12px}
+#side .search input::-webkit-search-cancel-button{display:none}    /* our red × clears */
+#side .search input:focus{border-color:var(--sel);box-shadow:0 0 0 2px color-mix(in srgb,var(--sel) 18%,transparent)}
+.search-icon{position:absolute;left:17px;top:14px;width:14px;height:14px;color:var(--dim);pointer-events:none}
+.search-icon svg{display:block;width:14px;height:14px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+#qclr{position:absolute;right:13px;top:11px;width:20px;height:20px;padding:0;line-height:17px;
+  text-align:center;border-radius:50%;font-size:16px;font-weight:700;color:var(--err);border-color:transparent;background:transparent}    /* red: plainly the way to clear the search */
+#qclr:hover:not(:disabled){background:var(--err);color:#fff;border-color:transparent}
 #qclr[hidden]{display:none}
-#tree{flex:1;overflow-y:auto;overflow-x:hidden;padding-bottom:8px;font-size:12px;background:var(--table-list-bg);
+#tree{flex:1;min-height:0;overflow-y:auto;overflow-x:hidden;padding-bottom:4px;font-size:12px;background:var(--bg);
   scrollbar-width:thin;scrollbar-color:transparent transparent;transition:scrollbar-color .2s ease}
 #tree:hover{scrollbar-color:rgba(0,0,0,.25) transparent}
 :root[data-theme=dark] #tree:hover{scrollbar-color:rgba(255,255,255,.25) transparent}
@@ -136,6 +142,17 @@ input[type="search"]::-webkit-search-cancel-button{cursor:pointer;margin-left:6p
 .obj .obj-copy{flex:none;width:22px;height:22px;margin-right:-6px;padding:0;display:none;align-items:center;justify-content:center;border:0;border-radius:3px;background:transparent;color:var(--dim)}
 .obj:hover .obj-copy,.obj .obj-copy:focus-visible{display:inline-flex}
 .obj .obj-copy:hover{color:var(--fg);background:var(--bg)}
+.hist{height:auto;min-height:29px;padding:6px 12px;align-items:flex-start}    /* one saved query: its SQL on one line, when and how it went under it */
+.hist-main{flex:1;min-width:0;overflow:hidden}
+.hist-sql{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:11.5px Menlo,Monaco,Consolas,"Courier New",monospace}
+.hist-meta{margin-top:2px;font-size:10.5px;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}    /* one line with …, like the SQL above it */
+.hist-head{display:flex;align-items:center;justify-content:space-between;height:28px;padding:0 6px 0 12px;font-size:11px;font-weight:700;color:var(--dim);border-bottom:1px solid var(--row-line)}
+.hist-head .hist-clear{width:22px;height:22px;padding:0;display:inline-flex;align-items:center;justify-content:center;border:0;border-radius:3px;background:transparent;color:var(--dim)}
+.hist-head .hist-clear:hover{color:var(--err);background:var(--bg)}
+.hist-head .hist-clear svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+#sidefoot{flex:none;padding:7px 12px 0;font-size:11px;color:var(--dim);border-top:1px solid var(--card-line);background:var(--th-bg)}    /* the list's count, pinned under it, in the card's footer band with the search */
+#sidefoot[hidden] + .search{border-top:1px solid var(--card-line);padding-top:8px}
+#sidefoot[hidden]{display:none}
 .obj .obj-copy svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 
 #main{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
@@ -171,15 +188,6 @@ body.more-open .tab.on{background:transparent;color:var(--nav-fg)}    /* only on
   background:var(--nav);position:relative;z-index:2}
 #optionswrap[hidden],#optionswrap > [hidden]{display:none!important}
 /* SQL Runner: the fixed first item of the sidebar, like Admin's Dashboard; .on while the runner is open */
-/* the query runner: the first row of the table list (above the first table, on every tab, never filtered by the search), a divider under it */
-.side-runner{display:flex;align-items:center;gap:8px;margin:0;height:31px;padding:0 12px;border:0;border-bottom:1px solid var(--line);border-radius:0;
-  background:var(--table-list-bg);color:var(--nav);font-size:12px;font-weight:600;cursor:pointer;transition:none}    /* instant, like a table row */
-.side-runner[hidden]{display:none}
-.side-runner svg{width:15px;height:15px;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
-.side-runner:hover:not(:disabled){background:var(--hl);border-color:var(--line)}    /* beats the general button:hover; the divider keeps its colour */
-:root[data-theme=dark] .side-runner{color:#c792ea}
-.side-runner.on,.side-runner.on:hover:not(:disabled){background:var(--side-on);color:var(--side-on-fg);font-weight:700;box-shadow:inset 4px 0 0 var(--sel)}    /* selected exactly like a table (.obj.on), hovered or not */
-:root[data-theme=dark] .side-runner.on{color:var(--side-on-fg)}
 #tabs .headicon{width:30px;height:30px;padding:0;margin:0 2px;border:0;border-radius:3px;
   font-size:16px;line-height:28px;text-align:center;align-self:center;background:transparent;color:#fff}
 #tabs .headicon:hover:not(:disabled){background:rgba(255,255,255,.2);color:#fff;border-color:transparent}
@@ -194,68 +202,62 @@ body.more-open .tab.on{background:transparent;color:var(--nav-fg)}    /* only on
 #tabs #connbtn:hover:not(:disabled){background:#fff;color:var(--nav);border-color:#fff}    /* same look as SQL Runner */
 @media (max-width:1000px){.tab,#moretab{padding-left:10px;padding-right:10px}#optionswrap{margin-left:8px;padding-left:6px}}
 
-#tools{display:flex;align-items:center;gap:7px;padding:8px 10px;border-top:1px solid var(--line);
-  border-bottom:1px solid var(--line);background:var(--filter-bg);box-shadow:0 1px 0 rgba(0,0,0,.03)}
-#tools .filterlabel{flex:none;color:var(--dim);font-size:11px;font-weight:700;letter-spacing:.02em;
-  text-transform:uppercase;margin-right:3px;white-space:nowrap}
-#tools select,#tools input,#tools button{height:32px;padding:4px 9px;font-size:12px}
-.fcol-picker{position:relative;display:inline-flex}
-.fcol-btn{height:32px;padding:4px 12px 4px 10px;min-width:160px;max-width:260px;background:var(--bg);
-  border:1px solid var(--line);border-radius:3px;font-size:12px;color:var(--fg);cursor:pointer;
-  display:inline-flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;outline:none}
-.fcol-btn:hover{border-color:#8a8a8a;background:var(--hl)}
-.fcol-btn:focus-visible{border-color:var(--sel);box-shadow:0 0 0 2px rgba(56,116,215,.2)}
-.fcol-btn-text{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500}
-.fcol-btn-arrow{display:inline-flex;align-items:center;justify-content:center;color:var(--dim);flex:none;margin-left:auto}
-.fcol-btn-arrow svg{display:block;width:11px;height:11px;stroke:var(--dim)}
-#tools #fop,#tools #pagesize{height:32px;min-width:68px;flex:none;padding:4px 28px 4px 10px;    /* #tools beats '#tools select', which would reset the arrow's room */
-  font-size:12px;appearance:none;
-  -webkit-appearance:none;-moz-appearance:none;cursor:pointer;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
-  background-repeat:no-repeat;background-position:right 10px center;background-size:11px 11px}
-:root[data-theme=dark] #tools #fop,:root[data-theme=dark] #tools #pagesize{
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23aaaaaa' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");}
-.fcol-menu{position:absolute;top:calc(100% + 4px);left:0;z-index:100;width:240px;
-  background:var(--bg);border:1px solid var(--line);border-radius:4px;
-  box-shadow:0 6px 22px rgba(0,0,0,.2);overflow:hidden;display:flex;flex-direction:column}
-.fcol-menu[hidden]{display:none}
-.fcol-search-wrap{padding:6px;border-bottom:1px solid var(--line);background:var(--side)}
-.fcol-search{width:100%!important;height:28px!important;padding:2px 8px!important;font-size:12px;
-  border:1px solid var(--line);border-radius:3px;background:var(--bg);outline:none}
-.fcol-search:focus{border-color:var(--sel)}
-.fcol-list{max-height:240px;overflow-y:auto;overflow-x:hidden;padding:4px 0}
-.fcol-item{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 10px;
-  font-size:12px;cursor:pointer;user-select:none}
-.fcol-item:hover,.fcol-item.active{background:var(--hl);color:var(--fg)}
-.fcol-item.selected{background:var(--side-on);color:var(--side-on-fg);font-weight:600}
-.fcol-item .col-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.fcol-empty{padding:10px 12px;color:var(--dim);font-size:12px;text-align:center}
-#fgo,#fclr{height:32px;padding:0 14px;font-size:12px;font-weight:600;border-radius:4px;cursor:pointer;outline:none;transition:background .15s,border-color .15s,box-shadow .15s}
-#fgo{margin-left:4px;background:#2ea44f;border:1px solid #278842;color:#fff;box-shadow:0 1px 2px rgba(0,0,0,.08)}
-#fgo:hover:not(:disabled){background:#2c974b;border-color:#247c3c;box-shadow:0 1px 3px rgba(0,0,0,.14)}
-#fgo:active:not(:disabled){background:#278842}
-#fgo:focus,#fgo:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(46,164,79,.3)}
-#fclr{margin-left:6px;background:#fff;border:1px solid #d0d7de;color:#475569;box-shadow:0 1px 2px rgba(0,0,0,.04)}
-#fclr:hover:not(:disabled){background:#f3f4f6;color:#1e293b;border-color:#94a3b8}
-#fclr:active:not(:disabled){background:#e2e8f0}
-#fclr:focus,#fclr:focus-visible{outline:none;box-shadow:0 0 0 3px rgba(148,163,184,.3)}
-:root[data-theme=dark] #fgo{background:#238636;border-color:#2ea043;color:#fff;box-shadow:none}
-:root[data-theme=dark] #fgo:hover:not(:disabled){background:#2ea043;border-color:#3fb950}
-:root[data-theme=dark] #fgo:focus,:root[data-theme=dark] #fgo:focus-visible{box-shadow:0 0 0 3px rgba(46,164,79,.4)}
-:root[data-theme=dark] #fclr{background:#21262d;border-color:#363b42;color:#cbd5e1;box-shadow:none}
-:root[data-theme=dark] #fclr:hover:not(:disabled){background:#30363d;border-color:#64748b;color:#f8fafc}
-:root[data-theme=dark] #fclr:focus,:root[data-theme=dark] #fclr:focus-visible{box-shadow:0 0 0 3px rgba(100,116,139,.4)}
-#fval{width:180px}
-#tools .sp{flex:1}
-#ftxt{white-space:nowrap}
-#fslow{display:flex;align-items:center;gap:8px;flex:none;padding:5px 10px;font-size:12px;color:#7a4a00;background:#fff6e0;border-bottom:1px solid #f1dfb0}
+/* ==== the grid card: a header band like the row panel's (the table with its rows and size; pages, page size, refresh, download, filter, add), the slow-filter note, then the grid ==== */
+#gridcard,#qcard{flex:1;min-height:0;display:flex;flex-direction:column;position:relative;margin:8px 10px 10px;background:var(--bg);
+  border:1px solid var(--card-line);border-radius:6px;box-shadow:var(--card-shadow);overflow:hidden}
+#qcard[hidden]{display:none}
+#gridcard > #vp,#qcard > #vp{margin:0;border:0;border-radius:0;box-shadow:none}
+#v-rows,#qres{--rp-eff:max(300px,min(var(--rp-w,min(480px,42%)),calc(100% - 540px)))}    /* the panel's width: the chosen or default width, never leaving the grid card under about 470px (its header's one line) */
+#v-rows.rp-open #gridcard,#qres.rp-open > #qcard{margin-right:calc(var(--rp-eff) + 58px)}    /* the panel's width and right margin (10px) plus a 48px gap; a query result's grid makes the same room */
+#gridcard{container-type:inline-size}
+@container (max-width:500px){ #tools .pagenum{display:none} }    /* a narrow grid card: the page buttons stay, their label goes, so the header keeps one line */
+.card-head{display:flex;align-items:center;gap:4px;flex:none;min-height:52px;padding:6px 8px 6px 14px;border-bottom:1px solid var(--card-line);background:var(--th-bg)}    /* both cards' headers: one height, one band */
+.card-head .iconbtn,.card-head .pagebtn{width:26px;height:26px;padding:0;flex:none}
+.card-head .iconbtn svg,.card-head .pagebtn svg{width:13px;height:13px}
+.card-title{flex:1 1 0;min-width:48px;overflow:hidden}    /* gives way first: the controls keep their room */
+.card-title b{display:block;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.card-sub{display:block;margin-top:1px;font:11.5px Menlo,Monaco,Consolas,"Courier New",monospace;color:var(--dim);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#tools .gh-group{display:flex;align-items:center;gap:4px;flex:none}
+#tools .gh-group + .gh-group{margin-left:6px;padding-left:10px;border-left:1px solid var(--card-line)}    /* page size and pages, then the actions, with a divider between */
+#tools .pagenav{gap:2px}
+#tools .pagenum{min-width:0;padding:0 4px;font-size:12px;white-space:nowrap}
+#tools #pagesize{height:26px;min-width:0;margin:0 2px;padding:2px 28px 2px 8px;font-size:12px}
+#filterbtn.on,#filterbtn.on:hover:not(:disabled){background:var(--sel);border-color:var(--sel);color:var(--sel-fg)}    /* a filter is applied */
+#fclearbtn:not(:disabled){color:var(--err);border-color:color-mix(in srgb,var(--err) 45%,transparent)}    /* red while a filter is on: one click clears it */
+#fclearbtn:not(:disabled):hover{background:var(--err);border-color:var(--err);color:#fff}
+#fslow{display:flex;align-items:center;gap:8px;flex:none;padding:5px 12px;font-size:12px;color:#7a4a00;background:#fff6e0;border-bottom:1px solid #f1dfb0}
 #fslow[hidden]{display:none}
 #fslow span{overflow:hidden;text-overflow:ellipsis}
 #fslow button{height:24px;padding:0 9px;font-size:11.5px;flex:none}
 :root[data-theme=dark] #fslow{color:#f0c27a;background:#2a2214;border-bottom-color:#4a3a1c}
-#ftxt{color:#888;font-size:12px}
+/* the filter dialog: up to 10 conditions joined with AND or OR, one row each (column, operator, value, trash) */
+#fdlg{width:min(560px,calc(100vw - 32px))}
+#fdlg .bd{display:flex;flex-direction:column;gap:8px}
+.fd-join{display:flex;align-items:center;gap:10px;font-size:12.5px;color:var(--dim)}
+.fd-switch{display:inline-flex;gap:2px;padding:2px;background:var(--hl);border:1px solid var(--line);border-radius:6px}    /* like the sidebar's tabs */
+.fd-switch button{height:24px;padding:0 10px;border:0;border-radius:4px;background:transparent;color:var(--fg);font-size:12px;transition:none}
+.fd-switch button:hover:not(.on){background:color-mix(in srgb,var(--sel) 12%,transparent)}
+.fd-switch button.on,.fd-switch button.on:hover{background:var(--sel);color:var(--sel-fg);font-weight:600}
+.fd-row{display:flex;align-items:center;gap:8px}
+.fd-row .fd-col{width:190px;flex:none;height:32px;padding:4px 28px 4px 9px;font-size:12px;cursor:text}
+.fd-row .fd-col.bad{border-color:var(--err);box-shadow:0 0 0 2px color-mix(in srgb,var(--err) 20%,transparent)}
+.fd-row .fd-op{min-width:96px}
+.fd-row .fd-val{flex:1;min-width:100px;height:32px;padding:4px 9px;font-size:12px}
+.fd-row .fd-del{width:28px;height:28px;flex:none;color:var(--dim)}
+.fd-row .fd-del:hover:not(:disabled){color:var(--err)}
+.fd-row .fd-del svg{width:13px;height:13px}
+.fcolmenu{position:fixed;z-index:20;max-height:196px;overflow-y:auto;padding:4px 0;background:var(--bg);border:1px solid var(--line);border-radius:6px;box-shadow:0 8px 24px rgba(0,0,0,.18)}    /* the column list: short, searched by what is typed, above the dialog's edges */
+.fcolmenu[hidden]{display:none}
+.fcolmenu div{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:5px 10px;font-size:12px;cursor:pointer;white-space:nowrap}
+.fcolmenu div span{overflow:hidden;text-overflow:ellipsis}
+.fcolmenu div small{flex:none;color:var(--dim);font-size:10.5px}
+.fcolmenu div.on{background:var(--side-on);color:var(--side-on-fg)}
+.fcolmenu .none{color:var(--dim);cursor:default}
+#faddcond{align-self:flex-start;height:28px;padding:0 10px;font-size:12px;color:var(--sel);border-style:dashed}
+#fdlg #fclr{margin-right:auto}
+#fdlg .fd-op,#pagesize{height:32px;min-width:68px;flex:none;padding:4px 28px 4px 10px;font-size:12px}
 .detail-tools{height:50px;flex:none;display:flex;align-items:center;gap:8px;padding:8px 10px;
-  border-top:1px solid var(--line);border-bottom:1px solid var(--line);background:var(--filter-bg)}
+  border:0;background:transparent}    /* on the backdrop, above its table card */
 .detail-tools input{width:210px;min-width:120px;flex:0 1 210px;height:32px;padding:4px 6px 4px 9px;order:4}
 .detail-tools .sp{flex:1;order:1}.detail-count{order:2;color:var(--dim);font-size:12px;white-space:nowrap}
 .detail-refresh,.detail-download{order:3}
@@ -268,7 +270,7 @@ body.more-open .tab.on{background:transparent;color:var(--nav-fg)}    /* only on
 .detail-filter-box:focus-within{border-color:var(--sel)}
 .detail-tools .detail-filter-box .detail-filter{flex:0 1 auto;width:auto;min-width:0;height:30px;border:0;outline:none;padding:0 26px 0 0;font-size:12px;font-weight:600;cursor:pointer;
   appearance:none;-webkit-appearance:none;-moz-appearance:none;text-overflow:ellipsis;
-  background:transparent url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23888888' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E") no-repeat right 10px center/11px 11px}
+  background:transparent var(--arrow) no-repeat right 10px center/11px 11px}
 .detail-filter-box.on{border-color:var(--sel)}.detail-filter-box.on .detail-filter{color:var(--sel)}    /* an active filter stands out */
 .pagenav{display:inline-flex;align-items:center;gap:8px;flex:none}
 .pagenav[hidden]{display:none}
@@ -283,9 +285,12 @@ body.more-open .tab.on{background:transparent;color:var(--nav-fg)}    /* only on
 /* ==== virtual grid ==== */
 /* contain must not include size here: #rows is absolutely positioned and shrink-to-fit,
    so size-contained rows would measure as empty and collapse to zero width */
-#vp{flex:1;overflow:auto;position:relative;contain:layout paint;font-size:12px}
+#vp{flex:1;overflow:auto;position:relative;contain:layout paint;font-size:12px;
+    margin:8px 10px 10px;background:var(--bg);border:1px solid var(--card-line);border-radius:6px;box-shadow:var(--card-shadow)}    /* a card: its own edges, so columns past the right edge read as scrolled, not cut */
+#v-rows,#v-query{background:var(--canvas)}
+#vp::-webkit-scrollbar-corner{background:var(--bg)}    /* where the two scrollbars meet: the card's colour, not white in dark mode */
 #inner{position:relative;box-sizing:content-box}
-#head{position:sticky;top:0;z-index:3;display:flex;background:var(--bg);border-bottom:1px solid var(--th-line);border-left:1px solid var(--th-line)}
+#head{position:sticky;top:0;z-index:3;display:flex;background:var(--th-bg);border-bottom:1px solid var(--card-line)}    /* a grey header band: the columns read apart from the rows */
 .th{flex:none;padding:0 9px;height:39px;line-height:39px;font-weight:bold;color:var(--th-fg);
     position:relative;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;user-select:none;border-right:1px solid var(--th-line)}
 .th:hover{background:var(--th-hover)}
@@ -302,29 +307,23 @@ body.more-open .tab.on{background:transparent;color:var(--nav-fg)}    /* only on
 .tr:hover{background:var(--row-hover)}
 .td{flex:none;padding:0 9px;height:29px;line-height:29px;color:var(--fg);
     overflow:hidden;white-space:nowrap;text-overflow:ellipsis;border-right:1px solid var(--row-line)}
-.td:first-child{border-left:1px solid var(--row-line)}
 .td:last-child{border-right:1px solid var(--th-line)}
 .td.null{color:var(--null);text-transform:uppercase}
 /* ==== row panel: one row's fields beside the grid ==== */
-#v-rows.rp-open #vp{margin-right:var(--rp-w,min(520px,50%))}
 .tr.rp-sel,.tr.rp-sel:nth-child(odd){background:var(--row-hover)}    /* the panel's row stays lit in the hover colour */
 #rows .td{cursor:pointer}
 #rowpanel .iconbtn svg{width:13px;height:13px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 #rowpanel[hidden]{display:none}
-#rowpanel{position:absolute;right:0;bottom:0;width:var(--rp-w,min(520px,50%));z-index:5;display:flex;flex-direction:column;min-height:0;
-  background:var(--bg);border-left:1px solid var(--th-line);box-shadow:-6px 0 18px rgba(0,0,0,.08)}
+#rowpanel{position:absolute;top:8px;right:10px;bottom:10px;width:var(--rp-eff);z-index:5;display:flex;flex-direction:column;min-height:0;
+  background:var(--bg);border:1px solid var(--card-line);border-radius:6px;overflow:hidden;box-shadow:var(--card-shadow)}
 #rp-resize{position:absolute;left:-3px;top:0;bottom:0;width:6px;cursor:col-resize;z-index:1}
 #rp-resize:hover,#rp-resize.dragging{background:var(--nav)}
-.rp-head{display:flex;align-items:center;gap:4px;padding:8px 8px 8px 14px;border-bottom:1px solid var(--th-line);background:var(--rp-head)}    /* purple tint, like the top bar */
-.rp-title{flex:1 0 auto;min-width:72px;max-width:55%}    /* the title keeps room; the filter box gives way first */
-.rp-title b{display:block;font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#rp-key{display:flex;align-items:center;gap:4px;min-width:0;margin-top:1px}#rp-key[hidden]{display:none}    /* the row's key under table.key, with its own copy */
-#rp-keyval{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:11.5px Menlo,Monaco,Consolas,"Courier New",monospace;color:var(--dim)}
-#rowpanel #rp-keycopy{width:20px;height:20px;flex:none;border-color:transparent;background:transparent}#rowpanel #rp-keycopy:hover{border-color:var(--line)}
-#rowpanel #rp-keycopy svg{width:12px;height:12px}
+.rp-head{display:flex;align-items:center;gap:4px;min-height:52px;padding:6px 8px 6px 14px;border-bottom:1px solid var(--card-line);background:var(--th-bg)}    /* the same band as the grid card's header: which table and which row */
+.rp-title{flex:1 1 auto;min-width:72px;max-width:62%}    /* the title keeps room; the filter box gives way first */
+.rp-title b{display:block;font-size:12.5px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 #rowpanel .iconbtn{width:26px;height:26px;flex:none}    /* never squeezed by a long title */
 #rp-delete:not(:disabled):hover{color:var(--err);border-color:var(--err)}
-#rp-search{width:180px;flex:0 1 180px;min-width:70px;margin-right:4px;padding:4px 8px;font-size:12px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--fg)}
+#rp-search{width:120px;flex:0 1 120px;min-width:60px;margin-right:4px;padding:4px 8px;font-size:11.5px;border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--fg)}
 .rp-body{flex:1;min-height:0;overflow:auto;padding-bottom:12px}
 .rp-edit textarea{box-sizing:border-box;width:100%;min-height:72px;max-height:40vh;resize:vertical;margin-top:4px;padding:6px 8px;border:1px solid var(--line);border-radius:4px;
   background:var(--bg);color:var(--fg);font:12px/1.5 Menlo,Monaco,Consolas,"Courier New",monospace}
@@ -365,30 +364,46 @@ body.more-open .tab.on{background:transparent;color:var(--nav-fg)}    /* only on
 .rp-table th{position:sticky;top:0;z-index:1;height:28px;padding:0 10px;text-align:left;font-size:11px;font-weight:700;color:var(--th-fg);background:var(--hl);border-bottom:1px solid var(--th-line)}
 .rp-table td{height:28px;padding:0 10px;border-bottom:1px solid var(--row-line);vertical-align:middle;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .rp-table tbody tr:hover{background:var(--row-hover)}
-.rp-table .rp-col{width:30%;font-weight:600;color:var(--fg)}.rp-table .rp-ty{width:24%;color:var(--dim);font-size:11px}
+.rp-table .rp-col{width:var(--rp-colw,30%);font-weight:600;font-size:11.5px;color:var(--fg)}    /* as wide as the longest name (rowPanelDraw), at most 45% */
+.rp-table .rp-ty{width:24%;color:var(--dim);font-size:11px}
+.rp-table.no-types .rp-ty{display:none}    /* a query result has no column types */
 .rp-table tbody tr{cursor:pointer}
 .rp-table td.rp-val{position:relative;font:12px Menlo,Monaco,Consolas,"Courier New",monospace;color:var(--fg)}
 .rp-table td.rp-val.null{color:var(--null)}
 .rp-table td.rp-val .rp-value{display:block;margin:0;max-height:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font:inherit;color:inherit}
-#qbar #resetsql{background:var(--rp-head);border-color:var(--nav);color:var(--nav);font-weight:600}    /* highlighted: a query has run or the SQL changed */
-#qbar #resetsql:hover:not(:disabled){background:var(--nav);border-color:var(--nav);color:#fff}
-:root[data-theme=dark] #qbar #resetsql{color:var(--nav-fg)}
-:root[data-theme=dark] #qbar #resetsql:hover:not(:disabled){color:#fff}
+#qbar #resetsql{padding:4px 12px}    /* always in place after Download: greyed out until there is something to reset, then red */
+#qbar #resetsql:not(:disabled){background:var(--err);border-color:var(--err);color:#fff;font-weight:600}
+#qbar #resetsql:not(:disabled):hover{filter:brightness(.92)}
+.dl-choice{display:flex;flex-direction:column;gap:6px;margin-bottom:14px}
+.dl-choice>b{font-size:12px;color:var(--dim);font-weight:600}
+.dl-choice label{display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer}
+.dlg-note.dl-lead{margin:0 0 16px;padding:10px 12px;border-left:3px solid var(--sel);border-radius:4px;background:var(--hl);color:var(--fg)}    /* the dialog's lead: a highlighted box with room before the fields */
+.dl-lead b{font-weight:700}
+.dl-formats{display:flex;gap:16px}
+.dl-choice label.dl-opt{align-items:flex-start;padding:7px 10px;border:1px solid var(--line);border-radius:6px}    /* one format: its name and what it is for */
+.dl-choice label.dl-opt:has(input:checked){border-color:var(--sel);background:color-mix(in srgb,var(--sel) 7%,transparent)}
+.dl-opt input{margin-top:2px}
+.dl-opt-name{display:block;font-weight:600}
+.dl-opt-hint{display:block;margin-top:1px;font-size:11.5px;color:var(--dim)}
+.dl-choice.dl-sql[hidden]{display:none}
+.dl-choice label.dl-check{font-size:12.5px}
+#dlname{width:100%;height:32px;padding:4px 9px;box-sizing:border-box}
 button.danger{background:var(--err);border-color:var(--err);color:#fff;font-weight:600;box-shadow:0 1px 2px rgba(0,0,0,.08)}
 button.danger:hover:not(:disabled){background:var(--err);border-color:var(--err);filter:brightness(.92);box-shadow:0 2px 8px rgba(192,57,43,.35)}
 :root[data-theme=dark] button.danger,:root[data-theme=dark] button.danger:hover:not(:disabled){color:#141419}
 #empty{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:var(--dim);
   pointer-events:none}
-#v-rows > #empty{top:50px}
+#gridcard > #empty,#qcard > #empty{top:92px}    /* below the card's header and the grid's column names */
 #empty.on{display:flex}
 
 /* ==== detail panes ==== */
-.detail-wrap{flex:1;min-height:0;overflow:auto}
+.detail-wrap,#dbcat-wrap{flex:1;min-height:0;overflow:auto;margin:0 10px 10px;background:var(--bg);border:1px solid var(--card-line);border-radius:6px;box-shadow:var(--card-shadow)}    /* each tab's table is a card, like the rows grid */
+.view:has(> .detail-wrap),#v-info,#v-health{background:var(--canvas)}
 .detail-grid{width:auto;min-width:0;table-layout:fixed;border-collapse:separate;border-spacing:0;font-size:12px;
   border-right:1px solid var(--th-line)}
 .detail-grid th,.detail-grid td{padding:0 9px;text-align:left;
   overflow:hidden;white-space:nowrap;text-overflow:ellipsis;border-right:1px solid var(--row-line);border-bottom:1px solid var(--row-line)}
-.detail-grid th{height:40px;line-height:39px;position:sticky;top:0;z-index:2;background:var(--bg);color:var(--th-fg);font-weight:700;
+.detail-grid th{height:40px;line-height:39px;position:sticky;top:0;z-index:2;background:var(--th-bg);color:var(--th-fg);font-weight:700;
   border-right-color:var(--th-line);border-bottom-color:var(--th-line)}
 .detail-grid tbody tr:nth-child(odd){background:var(--row-odd)}
 .detail-grid tbody tr:hover{background:var(--row-hover)}
@@ -398,12 +413,12 @@ button.danger:hover:not(:disabled){background:var(--err);border-color:var(--err)
 .detail-grid .empty-detail,#dbcat-table .empty-detail{height:90px;line-height:90px;text-align:center;color:var(--dim);font-family:inherit}
 
 #sqlwrap{height:210px;min-height:70px;flex:none;position:relative;overflow:hidden;
-  background:var(--bg)}
+  margin:10px 10px 0;background:var(--bg);border:1px solid var(--card-line);border-radius:6px;box-shadow:var(--card-shadow)}    /* the editor is a card too */
 #sqlresizer{height:9px;margin:-4px 0 -4px 0;position:relative;z-index:10;cursor:row-resize;
   display:flex;align-items:center;justify-content:center;flex:none;
   touch-action:none;user-select:none;outline:none}
 #sqlresizer::before{content:"";position:absolute;left:0;right:0;top:4px;height:1px;
-  background:var(--line);transition:background .15s ease,height .15s ease}
+  background:transparent;transition:background .15s ease,height .15s ease}
 #sqlresizer:hover::before,#sqlresizer.dragging::before,#sqlresizer:focus-visible::before{
   background:var(--sel);height:2px}
 .sqlresizer-grip{position:relative;z-index:2;width:38px;height:4px;border-radius:2px;
@@ -436,10 +451,11 @@ body.resizing-col *{user-select:none!important}
 .sql-key{color:var(--sql-key);font-weight:400}.sql-string{color:var(--sql-string)}
 .sql-ident{color:var(--sql-ident)}.sql-number{color:var(--sql-number)}.sql-comment{color:var(--sql-comment)}
 .sql-param{color:var(--sql-param)}.sql-type{color:var(--sql-type)}.sql-fn{color:var(--sql-fn)}
-#qbar{display:flex;align-items:center;gap:10px;padding:8px 10px;border-bottom:1px solid var(--th-line)}
-#qmsg{color:#888;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:auto}
+#qbar{display:flex;align-items:center;gap:10px;padding:8px 10px}    /* on the backdrop, between the editor and the results cards */
+#qmsg{color:#888;font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-left:auto;min-width:0;flex:0 1 auto}    /* fills the middle and gives way first: the buttons keep their places */
+#qbar > button{flex:none}
 #qmsg.err{color:var(--err)}
-#qbar .export{padding:4px 10px}
+#qdownload[hidden]{display:none}
 #streamprogress{display:flex;align-items:center;gap:7px;color:var(--dim);font-size:11px;white-space:nowrap}
 #streamprogress[hidden]{display:none}
 #streambar{width:110px;height:7px;accent-color:var(--green)}
@@ -463,22 +479,22 @@ body.resizing-col *{user-select:none!important}
 #status .t{color:var(--green)}
 
 dialog{border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--fg);padding:0;overflow:hidden;
-       box-shadow:0 18px 48px rgba(0,0,0,.28);min-width:min(500px,92vw);max-width:min(640px,92vw)}
+       box-shadow:0 18px 48px rgba(0,0,0,.28);width:min(480px,calc(100vw - 32px));min-width:0;max-width:none}    /* two widths only: 480px for messages and choices, 560px for forms and values (field, add row, filter) */
 dialog::backdrop{background:rgba(0,0,0,.45)}
 dialog .hd{padding:13px 18px;border-bottom:1px solid var(--line);background:var(--rp-head);font-weight:600;font-size:14px;
   display:flex;align-items:center;gap:10px}
 dialog .hd .title{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 dialog .bd{padding:16px 18px;max-height:72vh;overflow:auto;font-size:13px;line-height:1.5}
 dialog .ft{padding:12px 18px;border-top:1px solid var(--line);background:var(--side);display:flex;gap:8px;justify-content:flex-end}
-dialog.structured{width:min(760px,calc(100vw - 32px));min-width:min(540px,92vw);max-width:none}
+dialog.structured{width:min(560px,calc(100vw - 32px))}
 dialog.structured .bd{padding:0;overflow:hidden;background:var(--side)}
-dialog.fm,dialog.fm.structured{width:min(640px,calc(100vw - 32px));min-width:0;max-width:none}    /* one width for every field, in view and edit */
+dialog.fm,dialog.fm.structured{width:min(560px,calc(100vw - 32px));min-width:0;max-width:none}    /* one width for every field, in view and edit */
 /* the field modal: one fixed body height for every type, in view and edit; only the body scrolls, long lines wrap */
-dialog.fm .bd,dialog.fm.structured .bd{box-sizing:border-box;height:min(240px,60vh);min-height:0;max-height:none;overflow:auto}
+dialog.fm .bd,dialog.fm.structured .bd{box-sizing:border-box;height:min(200px,55vh);min-height:0;max-height:none;overflow:auto}
 dialog.fm.structured .bd{padding:0}
 dialog.fm #cellbox.json{min-height:100%;max-height:none;overflow:visible;white-space:pre-wrap;overflow-wrap:anywhere}
 /* the create form, compact: label left, the same input as Edit right, one line per short field */
-dialog.cf{width:min(600px,calc(100vw - 32px));max-width:none}
+dialog.cf{width:min(560px,calc(100vw - 32px))}
 dialog.cf .bd{max-height:min(66vh,600px);padding:10px 18px 12px}
 .cf-field{display:grid;grid-template-columns:140px minmax(0,1fr);gap:2px 12px;padding:4px 0;align-items:start}
 .cf-head{display:flex;flex-direction:column;align-items:flex-start;gap:1px;padding-top:6px;min-width:0}
@@ -505,7 +521,7 @@ dialog.cf .fm-bools{gap:6px}dialog.cf .fm-bools button{height:30px;font-size:12p
 .save-err{margin-top:10px;padding:6px 9px;border:1px solid var(--err);border-radius:6px;color:var(--err);font-size:12px;white-space:pre-wrap}
 @media (max-width:520px){ .cf-field{grid-template-columns:minmax(0,1fr)} .cf-field .fm-check{grid-column:1} .cf-head{flex-direction:row;align-items:baseline;gap:8px;padding-top:0} }
 dl.fm-details{margin:18px 0 0;padding:12px 14px;border:1px solid var(--line);border-radius:6px;background:var(--side)}    /* facts about the value, set apart below it */
-dialog.fm #cellbox:not(.json){font-size:14px;line-height:1.6;color:var(--fg)}    /* the value itself reads first */
+dialog.fm #cellbox:not(.json){font-size:13px;line-height:1.6;color:var(--fg)}    /* the value itself reads first */
 dialog.fm .fm-list,dialog.fm .fm-items{max-height:none}
 dialog.fm.fm-editing .bd{display:flex;flex-direction:column}    /* the editor fills the fixed height */
 dialog.fm .fm-edit{flex:1;min-height:0;display:flex;flex-direction:column}
@@ -521,16 +537,17 @@ dialog.fm .ft{box-sizing:border-box;min-height:54px;align-items:center;flex-wrap
 .json-key{color:var(--sql-ident)}.json-string{color:var(--sql-string)}.json-number{color:var(--sql-number)}
 .json-bool{color:var(--sql-key)}.json-null{color:var(--null)}
 #v-info{overflow:hidden;padding:0}
-#dbinfo-summary{height:100%;overflow:auto;padding:22px 26px}
-.dbi{max-width:1000px;display:flex;flex-direction:column;gap:24px}
+#dbinfo-summary{height:100%;overflow:auto;padding:8px 10px 10px}
+.dbi{max-width:1100px;display:flex;flex-direction:column;gap:10px}
+.dbi > section{padding:14px 16px;background:var(--bg);border:1px solid var(--card-line);border-radius:6px;box-shadow:var(--card-shadow)}    /* one card per section, as in the rows view */
 .dbi-msg{color:var(--dim);font-size:13px}
 .dbi-title{margin:0 0 10px;font-size:11px;font-weight:700;letter-spacing:.05em;text-transform:uppercase;color:var(--dim)}
 .dbi-note{margin-left:6px;font-weight:400;letter-spacing:0;text-transform:none;opacity:.8}
 .dbi-tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
-.dbi-tile{display:flex;flex-direction:column;gap:2px;padding:12px 14px;border:1px solid var(--line);border-radius:8px;background:var(--bg);cursor:pointer;transition:border-color .12s,background .12s}
+.dbi-tile{display:flex;flex-direction:column;gap:2px;padding:12px 14px;border:1px solid var(--card-line);border-radius:6px;background:var(--th-bg);cursor:pointer;transition:border-color .12s,background .12s}
 .dbi-tile:hover,.dbi-tile:focus-visible{border-color:var(--nav);background:var(--rp-head);outline:none}
 .dbi-tile.off{cursor:default;opacity:.5}
-.dbi-tile.off:hover{border-color:var(--line);background:var(--bg)}
+.dbi-tile.off:hover{border-color:var(--card-line);background:var(--th-bg)}
 .dbi-tile .n{font-size:22px;font-weight:700;line-height:1.15;color:var(--fg)}
 .dbi-tile .l{font-size:12px;color:var(--dim)}
 .dbi-tile .sub{display:flex;flex-wrap:wrap;gap:2px 8px;margin-top:6px}
@@ -543,8 +560,8 @@ dialog.fm .ft{box-sizing:border-box;min-height:54px;align-items:center;flex-wrap
 .dbi-kv dd{display:flex;align-items:center;gap:6px;margin:0;min-width:0;color:var(--fg);font-family:Menlo,Monaco,Consolas,"Courier New",monospace;word-break:break-all}
 .dbi-kv dd .iconbtn{width:24px;height:24px;flex:none}
 #dbinfo-catalog{height:100%;display:flex;flex-direction:column;min-height:0}
-#v-health{overflow:auto;padding:22px 26px}
-.hl-head{display:flex;align-items:center;gap:14px;padding:16px 18px;border:1px solid var(--line);border-radius:10px;background:var(--rp-head)}
+#v-health{overflow:auto;padding:8px 10px 10px}
+.hl-head{display:flex;align-items:center;gap:14px;padding:14px 16px;border:1px solid var(--card-line);border-radius:6px;background:var(--bg);box-shadow:var(--card-shadow)}
 .hl-head .sp{flex:1}.hl-head h2{margin:0 0 8px;font-size:17px;display:flex;align-items:center;gap:8px}.hl-head h2 svg{width:18px;height:18px;fill:none;stroke:var(--sel);stroke-width:2.2;stroke-linecap:round;stroke-linejoin:round}
 .hl-chips{display:flex;flex-wrap:wrap;gap:6px}
 .hl-chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border:1px solid var(--line);border-radius:12px;background:var(--bg);font-size:12px;color:var(--fg);max-width:100%}
@@ -559,27 +576,26 @@ dialog.fm .ft{box-sizing:border-box;min-height:54px;align-items:center;flex-wrap
 .hl-tile .top{display:flex;align-items:center;justify-content:space-between;gap:6px}
 .hl-st{font-size:10.5px;font-weight:700;letter-spacing:.04em;text-transform:uppercase}
 .hl-ok{color:var(--green)}.hl-watch{color:var(--warn)}.hl-upgrade{color:var(--err)}.hl-unknown{color:var(--dim)}
-.hl-tile{cursor:default;border-left-width:3px}.hl-tile:hover{border-color:var(--line);background:var(--bg)}
+.hl-tile{cursor:default;border-left-width:3px}.hl-tile:hover{border-color:var(--card-line);background:var(--th-bg)}
 .hl-tile.hl-ok{border-left-color:var(--green)}.hl-tile.hl-watch{border-left-color:var(--warn)}.hl-tile.hl-upgrade{border-left-color:var(--err)}.hl-tile.hl-unknown{border-left-color:var(--line)}
 .hl-tile .n{font-size:17px;margin-top:2px}.hl-tile .d{font-size:11.5px;color:var(--dim);margin-top:4px;line-height:1.4}
 .hl-bar{height:6px;border-radius:3px;background:var(--hl);overflow:hidden;margin-top:6px}.hl-bar i{display:block;height:100%;background:var(--sel)}
 .hl-wrap{overflow:auto;border:1px solid var(--line);border-radius:8px;max-height:420px}
 .hl-table{border-collapse:separate;border-spacing:0;width:100%;font-size:12px}
 .hl-table th,.hl-table td{height:30px;padding:0 10px;border-bottom:1px solid var(--row-line);text-align:left;white-space:nowrap;max-width:420px;overflow:hidden;text-overflow:ellipsis}
-.hl-table th{position:sticky;top:0;z-index:1;background:var(--bg);color:var(--th-fg);font-weight:700;border-bottom-color:var(--th-line)}
+.hl-table th{position:sticky;top:0;z-index:1;background:var(--th-bg);color:var(--th-fg);font-weight:700;border-bottom-color:var(--th-line)}
 .hl-table td.num,.hl-table th.num{text-align:right;font-variant-numeric:tabular-nums}
 .hl-table tbody tr:nth-child(odd){background:var(--row-odd)}.hl-table tbody tr:hover{background:var(--row-hover)}
 .hl-table td.bad{color:var(--err);font-weight:600}.hl-table td.warn{color:var(--warn);font-weight:600}.hl-table td.dim{color:var(--dim)}
 .hl-empty{color:var(--dim);font-size:12.5px;padding:10px 2px}
 .hl-actions{margin:8px 0 0;padding-left:18px;font-size:12.5px}
 #dbinfo-catalog[hidden],#dbinfo-summary[hidden]{display:none}
-#dbcat-tools{height:50px;display:flex;align-items:center;gap:8px;padding:8px 10px;border-bottom:1px solid var(--line);background:var(--filter-bg)}
+#dbcat-tools{height:50px;display:flex;align-items:center;gap:8px;padding:8px 10px;background:transparent}
 #dbcat-title{font-weight:700}.dbcat-sp{flex:1}#dbcat-count{color:var(--dim);white-space:nowrap}
 #dbcat-search{width:190px;height:32px;padding:4px 6px 4px 9px}#dbcat-download{width:32px;height:32px;padding:0}
-#dbcat-wrap{flex:1;min-height:0;overflow:auto}
 #dbcat-table{border-collapse:separate;border-spacing:0;table-layout:fixed;width:auto;min-width:0;font-size:12px}
 #dbcat-table th,#dbcat-table td{height:30px;padding:0 9px;border-right:1px solid var(--th-line);border-bottom:1px solid var(--row-line);text-align:left;vertical-align:middle;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-#dbcat-table th{height:40px;line-height:39px;color:var(--th-fg);font-weight:700;background:var(--bg);position:sticky;top:0;z-index:2}
+#dbcat-table th{height:40px;line-height:39px;color:var(--th-fg);font-weight:700;background:var(--th-bg);position:sticky;top:0;z-index:2}
 #dbcat-table tbody tr:nth-child(odd){background:var(--row-odd)}#dbcat-table tbody tr:hover{background:var(--row-hover)}
 #dbcat-table td.dbcat-action-cell{text-overflow:clip}
 .cat-action-btn{display:inline-flex;align-items:center;justify-content:center;height:22px;padding:0 8px;font-size:11px;font-weight:600;line-height:20px;cursor:pointer;border-radius:3px;vertical-align:middle}
@@ -676,14 +692,18 @@ dialog.fm .ft{box-sizing:border-box;min-height:54px;align-items:center;flex-wrap
     <div id="sidetabs" role="tablist" aria-label="Object types" hidden>
       <button type="button" class="side-tab on" data-kind="table">Tables</button>
       <button type="button" class="side-tab" data-kind="view">Views</button>
-      <button type="button" class="side-tab" data-kind="materialized_view">Materialized</button>
+      <button type="button" class="side-tab" data-kind="materialized_view" title="Materialized views">Mat</button>
+      <button type="button" class="side-tab" data-kind="sql" title="Query runner and your SQL history">SQL</button>
     </div>
-    <div class="search" id="tablesearch" hidden>
-      <input id="q" placeholder="Search tables" autocomplete="off" spellcheck="false"/>
-      <button id="qclr" title="Clear" hidden>×</button>
+    <div id="sidecard">
+      <div id="tree" hidden></div>
+      <div id="sidefoot" role="status" hidden></div>
+      <div class="search" id="tablesearch" hidden>
+        <span class="search-icon" id="qicon" aria-hidden="true"></span>
+        <input id="q" type="search" placeholder="Search" aria-label="Search the list" autocomplete="off" spellcheck="false"/>
+        <button id="qclr" title="Clear" hidden>×</button>
+      </div>
     </div>
-    <button type="button" id="queryrunner" class="side-runner" title="Query runner (SQL Editor)" hidden><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 8 4 4-4 4M12 17h7"/></svg>Query runner</button>
-    <div id="tree" hidden></div>
   </aside>
 
   <div id="sideresizer" role="separator" aria-orientation="vertical" tabindex="0" title="Drag to adjust sidebar width (double-click to auto-fit or reset)" hidden></div>
@@ -775,56 +795,41 @@ dialog.fm .ft{box-sizing:border-box;min-height:54px;align-items:center;flex-wrap
       </div>
       <div class="view" id="v-health"><div id="health-summary"></div></div>
       <div class="view" id="v-rows">
-        <div id="tools">
-          <span class="filterlabel">Filter rows</span>
-          <div class="fcol-picker" id="fcol-picker">
-            <button type="button" class="fcol-btn" id="fcol-btn" aria-haspopup="listbox" aria-expanded="false" title="Choose column to filter">
-              <span class="fcol-btn-text" id="fcol-btn-text">Select column</span>
-              <span class="fcol-btn-arrow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg></span>
-            </button>
-            <div class="fcol-menu" id="fcol-menu" hidden>
-              <div class="fcol-search-wrap">
-                <input type="search" id="fcol-search" class="fcol-search" placeholder="Search columns…" autocomplete="off" spellcheck="false"/>
+        <div id="gridcard">
+          <div id="tools" class="card-head">
+            <div class="card-title"><b id="gh-table"></b><span class="card-sub" id="ftxt"></span></div>
+            <div class="gh-group" aria-label="Rows per page and pages">
+              <select id="pagesize" title="Rows per page" aria-label="Rows per page"></select>
+              <div class="pagenav" id="pagenav" hidden>
+                <button class="iconbtn pagebtn" id="prevbatch" title="Previous page" aria-label="Previous page"></button>
+                <span class="pagenum" id="pagenum">Page 1</span>
+                <button class="iconbtn pagebtn" id="nextbatch" title="Next page" aria-label="Next page"></button>
               </div>
-              <div class="fcol-list" id="fcol-list" role="listbox"></div>
             </div>
-            <select id="fcol" hidden></select>
+            <div class="gh-group" aria-label="Table actions">
+              <button class="iconbtn" id="rowrefresh" title="Refresh table data" aria-label="Refresh table data"></button>
+              <button class="iconbtn" id="rowcsv" title="Download the rows on this page as CSV" aria-label="Download the rows on this page as CSV" disabled></button>
+              <button class="iconbtn" id="rowadd" title="Add a row" aria-label="Add a row" disabled></button>
+              <button class="iconbtn" id="filterbtn" title="Filter rows" aria-label="Filter rows"></button>
+              <button class="iconbtn" id="fclearbtn" title="Clear the filter" aria-label="Clear the filter" disabled></button>
+            </div>
           </div>
-          <select id="fop">
-            <option>=</option><option>≠</option><option>&gt;</option><option>&lt;</option>
-            <option>≥</option><option>≤</option><option>LIKE</option><option>ILIKE</option>
-            <option>IS NULL</option><option>IS NOT NULL</option>
-          </select>
-          <input id="fval" placeholder="Filter value" autocomplete="off"/>
-          <button id="fgo" hidden>Apply</button>
-          <button id="fclr" title="Reset filter" hidden>Reset</button>
-          <span class="sp"></span><span id="ftxt"></span>
-          <select id="pagesize" title="Rows per page" aria-label="Rows per page"></select>
-          <div class="pagenav" id="pagenav" hidden>
-            <button class="iconbtn pagebtn" id="prevbatch" title="Previous page" aria-label="Previous page"></button>
-            <span class="pagenum" id="pagenum">Page 1</span>
-            <button class="iconbtn pagebtn" id="nextbatch" title="Next page" aria-label="Next page"></button>
-          </div>
-          <button class="iconbtn" id="rowrefresh" title="Refresh table data" aria-label="Refresh table data"></button>
-          <button class="iconbtn" id="rowcsv" title="Download the rows on this page as CSV" aria-label="Download the rows on this page as CSV" disabled></button>
-          <button class="iconbtn" id="rowadd" title="Add a row" aria-label="Add a row" disabled></button>
+          <div id="fslow" role="status" hidden></div>
+          <div id="vp"><div id="inner">
+            <div id="head"></div>
+            <div id="canvas"><div id="rows"></div></div>
+          </div></div>
+          <div id="empty">No rows</div>
         </div>
-        <div id="fslow" role="status" hidden></div>
-        <div id="vp"><div id="inner">
-          <div id="head"></div>
-          <div id="canvas"><div id="rows"></div></div>
-        </div></div>
-        <div id="empty">No rows</div>
         <aside id="rowpanel" aria-label="Row details" hidden>
           <div id="rp-resize" title="Drag to resize (double-click to reset)"></div>
           <div class="rp-head">
-            <div class="rp-title"><b id="rp-title"></b><span id="rp-key" hidden><span id="rp-keyval"></span><button type="button" class="iconbtn" id="rp-keycopy" title="Copy the key" aria-label="Copy the key"></button></span></div>
+            <div class="rp-title"><b id="rp-title"></b><span class="card-sub" id="rp-sub"></span></div>
             <input type="search" id="rp-search" placeholder="Filter fields" aria-label="Filter fields" autocomplete="off" spellcheck="false">
             <button type="button" class="iconbtn" id="rp-prev" title="Previous row (↑)" aria-label="Previous row"></button>
             <button type="button" class="iconbtn" id="rp-next" title="Next row (↓)" aria-label="Next row"></button>
             <button type="button" class="iconbtn" id="rp-download" title="Download this row as CSV, one line per column" aria-label="Download this row as CSV"></button>
             <button type="button" class="iconbtn" id="rp-delete" aria-label="Delete this row"></button>
-            <button type="button" class="iconbtn" id="rp-close" title="Close (Esc)" aria-label="Close"></button>
           </div>
           <div class="rp-body" id="rp-body"></div>
         </aside>
@@ -849,18 +854,18 @@ dialog.fm .ft{box-sizing:border-box;min-height:54px;align-items:center;flex-wrap
         <div id="qbar">
           <button id="explain" title="Show the estimated query plan without executing the query">Explain</button>
           <button id="analyze" title="Execute the query and show actual timing and row counts">Analyze</button>
-          <button id="stream" title="Download all returned rows as a CSV">Download</button>
+          <button id="stream" title="Download every row this query returns: CSV, SQL dump, SQL INSERTs or JSON Lines, no row limit, streamed straight to the file">Download</button>
           <button class="primary" id="run" title="Execute the query">Execute</button>
-          <button id="resetsql" title="Reset to default SQL" hidden>Reset</button>
           <button id="cancelquery" hidden>Cancel</button>
           <span id="streamprogress" hidden><progress id="streambar"></progress><span id="streammsg"></span></span>
           <span id="qmsg"></span>
-          <button class="export" data-format="json" disabled>JSON</button>
-          <button class="export" data-format="xml" disabled>XML</button>
-          <button class="export" data-format="csv" disabled>CSV</button>
+          <button id="resetsql" title="Reset to the default SQL" disabled>Reset</button>
         </div>
         <div id="qres">
           <div id="qerror" hidden><div id="qerrorbox"><div id="qerrorhead"><span class="title" id="qerrortitle"></span><button type="button" class="iconbtn" id="qerrorcopy" title="Copy error" aria-label="Copy error"></button></div><pre id="qerrorbody"></pre></div></div>
+          <div id="qcard" hidden>
+            <div class="card-head"><div class="card-title"><b>Query result</b><span class="card-sub" id="qcard-sub"></span></div><div class="gh-group"><button class="iconbtn" id="qdownload" title="Download the rows shown: CSV, JSON or XML" aria-label="Download the rows shown" hidden></button></div></div>
+          </div>
         </div>
       </div>
     </div>
@@ -879,6 +884,16 @@ dialog.fm .ft{box-sizing:border-box;min-height:54px;align-items:center;flex-wrap
   <button data-v="dependencies">Dependencies</button>
 </div>
 
+<dialog id="fdlg" aria-label="Filter rows"><form method="dialog">
+  <div class="hd"><span class="title">Filter rows</span></div>
+  <div class="bd">
+    <div class="fd-join">Combine conditions with <div class="fd-switch" id="fjoin" role="radiogroup" aria-label="Combine conditions with AND or OR"><button type="button" data-join="and" title="AND: a row must match every condition">AND</button><button type="button" data-join="or" title="OR: a row must match at least one condition">OR</button></div></div>
+    <div id="fconds"></div>
+    <button type="button" id="faddcond">+ Add condition</button>
+    <div class="fcolmenu" id="fcolmenu" role="listbox" hidden></div>
+  </div>
+  <div class="ft"><button type="button" id="fclr" hidden>Clear all</button><button value="cancel">Cancel</button><button type="button" class="primary" id="fgo">Apply</button></div>
+</form></dialog>
 <dialog id="dlg"><form method="dialog">
   <div class="hd" id="dlg-t"></div><div class="bd" id="dlg-b"></div>
   <div class="ft" id="dlg-f"></div>
@@ -932,12 +947,14 @@ const icon = name => ({
   plug:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 22v-5M9 8V2M15 8V2M18 8v4a6 6 0 0 1-12 0V8z"/></svg>',
   expand:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>',
   plus:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
+  filter:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 5h18l-7 8.5V19l-4 2v-7.5z"/></svg>',
   pencil:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>',
   close:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>',
   chevronUp:'<svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="18 15 12 9 6 15"/></svg>',
   chevronDown:'<svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="6 9 12 15 18 9"/></svg>',
   chevronLeft:'<svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 18 9 12 15 6"/></svg>',
   chevronRight:'<svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="9 18 15 12 9 6"/></svg>',
+  search:'<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
   download:'<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M7 10l5 5 5-5M5 20h14"/></svg>',
   panelLeftOpen:'<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/><polyline points="12 15 15 12 12 9"/></svg>'
 })[name];
@@ -948,7 +965,8 @@ $('dbinfo').innerHTML=icon('info'); $('health').innerHTML=icon('pulse'); $('relo
 $('rowrefresh').innerHTML=icon('refresh');
 $('rowcsv').innerHTML=icon('download');
 $('rowadd').innerHTML=icon('plus');
-$('rp-keycopy').innerHTML=icon('copy');
+$('filterbtn').innerHTML=icon('filter');
+$('fclearbtn').innerHTML=icon('close');
 $('rp-download').innerHTML=icon('download');
 $('prevbatch').innerHTML=icon('chevronLeft');
 $('nextbatch').innerHTML=icon('chevronRight');
@@ -987,7 +1005,7 @@ const S = { db:'', table:'', kind:'', pk:null, cols:[], widths:[], total:0,
             sideCollapsed:getStored('sideCollapsed') === '1',
             sideTab:getStored('sideTab') || 'table',
             sideItems:[], sideShown:0, queryCleared:false,
-            filterApplied:{col:'',op:'=',val:''}, dbInfo:null, dbCatalog:{}, dbCatalogKind:'' };
+            filters:[], filterJoin:'and', dbInfo:null, dbCatalog:{}, dbCatalogKind:'' };
 let pool=[], lastFirst=-1, ticking=false;
 let lastC0=-1, lastC1=-1;    // the columns the row pool holds values for (all of them, unless the table is wide)
 const WIDE_COLS=40;    // over this many columns, only those in view (and 400px either side) get values as the grid scrolls
@@ -1122,11 +1140,10 @@ function setConnected(on){
   for(const el of $('optionswrap').querySelectorAll('.conn-only')) el.hidden = !on;    // the theme button stays, connected or not
   $('pane').hidden = false;
   $('status').hidden = true;
-  $('queryrunner').disabled = !on;
-  $('queryrunner').hidden = !on;
   $('sidetabs').hidden = !on;
   $('tablesearch').hidden = !on;
   $('tree').hidden = !on;
+  $('sidefoot').hidden = !on;
   $('reload').disabled = !on;
   $('rowrefresh').disabled = !on;
   $('run').disabled = $('stream').disabled = $('explain').disabled = $('analyze').disabled = $('resetsql').disabled = $('sql').disabled = !on;
@@ -1155,7 +1172,7 @@ async function doConnect(dsn){
   S.db = m.database; S.connectionUrl = m.connection_url || ''; S.tree = m.tree; S.dbInfo=null; S.dbCatalog={}; S.dbCatalogKind=''; S.connSeq=(S.connSeq||0)+1;    // a reply from the old connection is dropped
   $('health-summary').textContent='';    // another server's health must not show
   setConnected(true);
-  setSideTab(S.sideTab || 'table', false);
+  setSideTab('table', false);    // a new database opens on Tables; a reload keeps the tab (boot)
   drawTree(); openRunner();
 }
 function disconnected(){ setConnected(false); }
@@ -1311,7 +1328,7 @@ function parseDsnDb(dsn){
 function askDisconnect(){
   $('dlg-t').textContent = 'Disconnect';
   $('dlg-b').textContent = `Disconnect from ${S.db}? Any unsaved query text stays in the editor.`;
-  $('dlg-f').innerHTML = '<button value="cancel">Cancel</button><button class="primary" id="dyes">Disconnect</button>';
+  $('dlg-f').innerHTML = '<button value="cancel">Cancel</button><button class="danger" id="dyes">Disconnect</button>';
   $('dlg').showModal();
   $('dyes').onclick = async ev => {
     ev.preventDefault(); $('dlg').close();
@@ -1323,27 +1340,22 @@ function askDisconnect(){
 /* ==== sidebar ==== */
 function getKindMeta(kind){
   if(kind === 'view') return { singular: 'view', plural: 'views', label: 'Views' };
-  if(kind === 'materialized_view') return { singular: 'materialized view', plural: 'materialized views', label: 'Materialized' };
+  if(kind === 'materialized_view') return { singular: 'materialized view', plural: 'materialized views', label: 'Mat' };
+  if(kind === 'sql') return { singular: 'saved query', plural: 'saved queries', label: 'SQL' };
   return { singular: 'table', plural: 'tables', label: 'Tables' };
 }
 
-// each side tab shows how many objects it has, e.g. Tables (12); the sidebar is kept wide enough for them on one line
-function drawSideTabCounts(){
-  for(const btn of document.querySelectorAll('#sidetabs .side-tab')){
-    btn.dataset.label ||= btn.textContent.trim();
-    const count=((S.tree.public||{})[btn.dataset.kind]||[]).length;
-    const label=el('span',null,btn.dataset.label);
-    const badge=el('span','side-count',`(${count})`);
-    btn.replaceChildren(label,badge);
-  }
-  fitSidebarToTabs();
+// the list's count sits in the footer, not on the tabs, so the tabs keep one width whatever the number: "204 tables", "12 of 204 tables" while searching
+function drawSideFoot(shown,total,meta){
+  const noun=total===1?meta.singular:meta.plural;
+  $('sidefoot').textContent=shown===total?`${total.toLocaleString()} ${noun}`:`${shown.toLocaleString()} of ${total.toLocaleString()} ${noun}`;
 }
 function sideTabsWidth(){
   const tabs=$('sidetabs'); if(!tabs||tabs.hidden) return 0;
   const style=getComputedStyle(tabs);
   // the text's own width (spans do not stretch with the tab), plus each tab's padding and border
-  const tab=b=>[...b.children].reduce((w,span)=>w+span.getBoundingClientRect().width+parseFloat(getComputedStyle(span).marginLeft||0),0)+parseFloat(getComputedStyle(b).paddingLeft)*2+2;
-  return Math.ceil([...tabs.children].reduce((sum,b)=>sum+tab(b),0) + (tabs.children.length-1)*parseFloat(style.columnGap||4) + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight));
+  const tab=b=>{ const range=document.createRange(); range.selectNodeContents(b); return range.getBoundingClientRect().width+parseFloat(getComputedStyle(b).paddingLeft)*2; };    // the label's own width (the tab stretches)
+  return Math.ceil([...tabs.children].reduce((sum,b)=>sum+tab(b),0) + (tabs.children.length-1)*parseFloat(style.columnGap||2) + parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) + parseFloat(style.marginLeft) + parseFloat(style.marginRight) + 2);    // + the track's border
 }
 function fitSidebarToTabs(){
   const need=sideTabsWidth(), side=$('side');
@@ -1355,23 +1367,22 @@ function setSideTab(kind, triggerRender = true){
   for(const btn of document.querySelectorAll('#sidetabs .side-tab')){
     btn.classList.toggle('on', btn.dataset.kind === S.sideTab);
   }
-  const meta = getKindMeta(S.sideTab);
-  $('q').placeholder = `Search ${meta.plural}`;
   if(triggerRender) drawTree();
 }
 
 for(const btn of document.querySelectorAll('#sidetabs .side-tab')){
-  btn.onclick = () => setSideTab(btn.dataset.kind);
+  btn.onclick = () => { setSideTab(btn.dataset.kind); if(btn.dataset.kind==='sql') openRunner(); };    // SQL: the runner on the right, the history on the left
 }
 
 // All public schema objects stay in memory; DOM rows are appended in small batches.
 function drawTree(){
-  drawSideTabCounts();
+  fitSidebarToTabs();
   const kind = S.sideTab || 'table';
-  S.sideItems = ((S.tree.public||{})[kind]||[]).map(o=>o.name).sort((a,b)=>a.localeCompare(b));
+  S.sideItems = kind==='sql' ? [] : ((S.tree.public||{})[kind]||[]).map(o=>o.name).sort((a,b)=>a.localeCompare(b));
   renderTreeBatch(true);
 }
 function renderTreeBatch(reset=false){
+  if(S.sideTab==='sql'){ if(reset) drawHistory(); return; }    // at most SQL_HISTORY_MAX items: drawn at once
   const box=$('tree'), term=$('q').value.trim().toLowerCase();
   const kind = S.sideTab || 'table';
   const meta = getKindMeta(kind);
@@ -1389,10 +1400,69 @@ function renderTreeBatch(reset=false){
     frag.appendChild(d);
   }
   S.sideShown+=next.length; box.appendChild(frag);
+  if(reset) drawSideFoot(matches.length, S.sideItems.length, meta);
   if(reset && !matches.length){
     const empty=el('div','obj'); empty.style.cssText='color:var(--dim);cursor:default';
     empty.textContent=term?`No matching ${meta.plural}`:`No ${meta.plural} in public`; box.appendChild(empty);
   }
+}
+/* ==== SQL history: queries that ran with Execute (never a failed one), newest first, in this browser only (localStorage), one list per database ==== */
+// the last SQL_HISTORY_MAX per database, each up to SQL_HISTORY_SQL_MAX characters, for the last SQL_HISTORY_DBS databases used; the same SQL run again moves to the top
+const SQL_HISTORY_KEY='pgweb-sql-history', SQL_HISTORY_MAX=50, SQL_HISTORY_SQL_MAX=10000, SQL_HISTORY_DBS=10;
+function sqlHistoryDb(){ const p=dbParts(S.connectionUrl); return p?`${p.host}:${p.port}/${p.db}`:(S.db||''); }
+function sqlHistoryAll(){ try{ const all=JSON.parse(localStorage.getItem(SQL_HISTORY_KEY)); return all&&typeof all==='object'?all:{}; }catch{ return {}; } }
+function sqlHistory(){ const list=sqlHistoryAll()[sqlHistoryDb()]; return Array.isArray(list)?list.filter(item=>item.ok!==false):[]; }    // only queries that ran (failed ones saved before are left out)
+function sqlHistorySave(list){
+  const all=sqlHistoryAll(), db=sqlHistoryDb();
+  delete all[db]; if(list.length) all[db]=list;    // written last: the databases least recently used drop off first
+  const dbs=Object.keys(all); for(const old of dbs.slice(0,Math.max(0,dbs.length-SQL_HISTORY_DBS))) delete all[old];
+  for(let attempt=0;attempt<3;attempt++){
+    try{ localStorage.setItem(SQL_HISTORY_KEY,JSON.stringify(all)); return; }
+    catch{ if(!all[db]) return; all[db]=all[db].slice(0,Math.ceil(all[db].length/2)); }    // storage full: keep the newer half
+  }
+}
+function sqlHistoryAdd(sql,result){
+  sql=String(sql||'').trim().slice(0,SQL_HISTORY_SQL_MAX); if(!sql) return;
+  sqlHistorySave([{sql,at:Date.now(),...result},...sqlHistory().filter(item=>item.sql!==sql)].slice(0,SQL_HISTORY_MAX));
+  if(S.sideTab==='sql') drawHistory();
+}
+function drawHistory(){
+  const box=$('tree'), term=$('q').value.trim().toLowerCase(), all=sqlHistory();
+  const items=term?all.filter(item=>item.sql.toLowerCase().includes(term)):all;
+  box.textContent='';
+  if(all.length){
+    const head=el('div','hist-head'); head.appendChild(el('span',null,'History'));
+    const clear=iconButton('trash','Clear the whole history of this database','hist-clear'); clear.onclick=askClearSqlHistory;
+    head.appendChild(clear); box.appendChild(head);
+  }
+  for(const item of items){
+    const row=el('div','obj hist');
+    const main=el('div','hist-main');
+    main.append(el('div','hist-sql',item.sql.replace(/\s+/g,' ')),
+                el('div','hist-meta',[ago(item.at),`${(item.rows??0).toLocaleString()}${item.truncated?'+':''} ${item.rows===1&&!item.truncated?'row':'rows'}`,item.ms!=null?`${Math.round(item.ms).toLocaleString()} ms`:''].filter(Boolean).join(' · ')));
+    row.title=(item.sql.length>2000?item.sql.slice(0,2000)+'…':item.sql)+'\n\nClick to load it into the editor (it does not run)';
+    const del=iconButton('trash','Delete this query from the history','obj-copy');
+    del.onclick=e=>{ e.stopPropagation(); sqlHistorySave(sqlHistory().filter(x=>x.sql!==item.sql)); drawHistory(); };
+    row.append(main,del);
+    row.onclick=()=>loadHistorySql(item.sql);    // loads only: an old UPDATE or DELETE never runs again by a click
+    box.appendChild(row);
+  }
+  if(!items.length){ const empty=el('div','obj'); empty.style.cssText='color:var(--dim);cursor:default;white-space:normal;height:auto;padding:8px 12px'; empty.textContent=term?'No matching queries':'No queries yet: run one with Execute and it shows here'; box.appendChild(empty); }
+  drawSideFoot(items.length,all.length,getKindMeta('sql'));
+}
+function loadHistorySql(sql){
+  if(!$('v-query').classList.contains('on')) openRunner();
+  $('sql').value=sql; $('sql').dispatchEvent(new Event('input')); $('sql').focus();
+}
+function askClearSqlHistory(e){
+  e?.stopPropagation();
+  const count=sqlHistory().length; if(!count) return;
+  $('dlg-t').textContent='';
+  const title=el('span','title','Clear SQL history'); title.appendChild(el('span','dlg-type',sqlHistoryDb())); $('dlg-t').appendChild(title);
+  $('dlg-b').textContent=`All ${count} saved ${count===1?'query':'queries'} of this database will be deleted from this browser. This cannot be undone.`;
+  $('dlg-f').innerHTML='<button value="cancel">Cancel</button><button class="danger" id="histyes">Clear all</button>';
+  $('dlg').showModal();
+  $('histyes').onclick=ev=>{ ev.preventDefault(); $('dlg').close(); sqlHistorySave([]); drawHistory(); toast('SQL history cleared'); };
 }
 function searchTables(){
   const term = $('q').value.trim().toLowerCase();
@@ -1441,7 +1511,7 @@ function seedQuery(){
   }
 }
 function drawResetSql(){
-  $('resetsql').hidden=$('sql').value===DEFAULT_SQL && !S.local && $('qerror').hidden;
+  $('resetsql').disabled=!S.connected || ($('sql').value===DEFAULT_SQL && !S.local && $('qerror').hidden);    // shown always, so the bar never shifts
 }
 function openRunner(){
   for(const el of document.querySelectorAll('.obj.on')) el.classList.remove('on');
@@ -1455,7 +1525,6 @@ function openRunner(){
   drawResetSql();
   $('sql').focus();
 }
-$('queryrunner').onclick = openRunner;
 
 /* ==== open a table ==== */
 const detailCellValues=new WeakMap();
@@ -1638,11 +1707,11 @@ async function openObject(table, kind, initialTab = 'rows', first = null){    /*
     targetObj.scrollIntoView({block:'nearest'});
   }
   if(table!==S.table){ S.pageSize=DEFAULT_PAGE_SIZE; $('pagesize').value=S.pageSize; }   /* a changed page size lasts while this table stays open */
-  S.table=table; S.kind=targetKind; S.where=null; S.local=null; S.loaded={}; drawSlowFilterHint(0);
+  S.table=table; S.kind=targetKind; S.filters=[]; S.filterJoin='and'; S.local=null; S.loaded={}; drawSlowFilterHint(0);
   setExports(false);
   S.rows=[]; lastFirst=-1;
-  $('fval').value=''; $('ftxt').textContent='';
-  mountGrid($('v-rows'));
+  $('ftxt').textContent=''; $('gh-table').textContent=table; $('gh-table').title=table;
+  mountGrid($('gridcard'));
   for(const t of document.querySelectorAll('.tab')) t.hidden = t.dataset.v==='info' || t.dataset.v==='health';
   $('morewrap').hidden=false;
 
@@ -1661,18 +1730,13 @@ async function openObject(table, kind, initialTab = 'rows', first = null){    /*
 
   for(const input of document.querySelectorAll('.detail-search')) input.value='';
   for(const select of document.querySelectorAll('.detail-filter')){ select.value=''; select.parentElement.classList.remove('on'); }
-  $('fcol').textContent='';
-  for(const column of m.meta.columns){
-    const option=el('option'); option.value=column.name; option.textContent=column.name;
-    $('fcol').appendChild(option);
-  }
-  renderFcolPicker(m.meta.columns);
-  S.filterApplied={col:$('fcol').value,op:'=',val:''}; drawFilterOps(false); drawFilterActions();
+  drawFilterActions();
   drawStObj(table);
   $('st-rows').textContent = `${m.rows.length} rows loaded`;
   $('st-size').textContent = m.meta.stats.total_size || '';
   drawBatchNav(); buildGrid(); vp.scrollTop=0; render(true);
   show(initialTab || 'rows');
+  rowPanelAuto();    // after the view shows: the panel sits below the toolbar, measured from the grid's place
   return true;
 }
 
@@ -1763,7 +1827,7 @@ function rowAt(i){
   return (S.local || S.rows)[i] ?? null;
 }
 function filterParams(){
-  return S.where?{filter_col:S.where.col,filter_op:S.where.op,filter_value:S.where.val}:{};
+  return S.filters.length?{filters:S.filters.map(filterForApi),filter_join:S.filterJoin}:{};
 }
 function drawBatchNav(){
   const supported=!!S.pk, page=S.pageIndex+1;
@@ -1774,7 +1838,10 @@ function drawBatchNav(){
   const unsupported='Requires a single-column primary key';
   $('prevbatch').title=!supported?unsupported:S.pageIndex===0?'First page':`Go to Page ${page-1}`;
   $('nextbatch').title=!supported?unsupported:!S.after?'No more rows':`Go to Page ${page+1}`;
-  $('ftxt').textContent=`${S.total.toLocaleString()} ${S.total===1?'row':'rows'}`;    // the rows shown on this page
+  const size=S.meta?.stats?.total_size, estimate=S.meta?.stats?.estimated_rows;
+  const rows=`${S.total.toLocaleString()} ${S.total===1?'row':'rows'}`;    // the rows in view: this page, with its filter
+  $('ftxt').textContent=size?`${rows} · ${size}`:rows;
+  $('ftxt').title=`${rows} on this page${S.filters.length?' (filtered)':''}`+(estimate!=null?`; about ${estimate.toLocaleString()} rows in the table (PostgreSQL's estimate)`:'');
 }
 // pages follow the server's cursor: Next sends the last response's after, Previous the after saved for that page (S.cursors[i] opens page i+1; null is the first page)
 async function changeBatch(direction){
@@ -1791,12 +1858,12 @@ async function changeBatch(direction){
     if(seq!==rowsSeq) return;
     S.pageIndex=index; S.cursors.length=index+1;
     S.rows=page.rows; markCut(page); S.total=page.rows.length; S.after=page.after; drawSlowFilterHint(page.ms);
-    drawBatchNav(); buildGrid(); vp.scrollTop=0; lastFirst=-1; render(true);
+    drawBatchNav(); buildGrid(); vp.scrollTop=0; lastFirst=-1; render(true); rowPanelAuto();
   }catch(err){ if(seq!==rowsSeq) return; drawBatchNav(); alertBox('Batch navigation failed',err.message); }
 }
 $('prevbatch').onclick=()=>changeBatch('previous');
 // rows per page: 100 for every table; a change applies to the open table only and reloads its first page with the same filter
-for(const size of PAGE_SIZES){ const o=el('option'); o.value=size; o.textContent=`${size} / page`; $('pagesize').appendChild(o); }
+for(const size of PAGE_SIZES){ const o=el('option'); o.value=size; o.textContent=String(size); $('pagesize').appendChild(o); }
 $('pagesize').value=S.pageSize;
 $('pagesize').onchange=()=>{ S.pageSize=+$('pagesize').value; if(S.table) applyFilter(); };
 $('nextbatch').onclick=()=>changeBatch('next');
@@ -1944,8 +2011,9 @@ for(const table of document.querySelectorAll('.detail-grid')) table.tBodies[0].a
 
 /* ==== row panel ==== */
 // one row's fields beside the grid: open from the button on a row's left edge; ↑/↓ move between rows, Esc closes
+$('qicon').innerHTML=icon('search'); $('qdownload').innerHTML=icon('download');
 $('rp-prev').innerHTML=icon('chevronUp'); $('rp-next').innerHTML=icon('chevronDown');
-$('rp-delete').innerHTML=icon('trash'); $('rp-close').innerHTML=icon('close');
+$('rp-delete').innerHTML=icon('trash');
 // a click on a cell opens its row here; selecting text to copy does not
 rowsEl.addEventListener('click', e=>{
   const td=e.target.closest('.td'); if(!td||!S.cols.length) return;
@@ -1953,21 +2021,20 @@ rowsEl.addEventListener('click', e=>{
   const tr=td.parentElement; if(tr.hidden) return;
   rowPanelOpen(+tr.dataset.i);
 });
-// drag the panel's left edge to widen it for long values; the width is remembered, double-click resets it
+// drag the panel's left edge to widen it for long values; the width is remembered, double-click resets it (capped as in --rp-eff: the grid card keeps room for its header)
 {
-  const host=$('v-rows'), panel=$('rowpanel');
-  const saved=+getStored('rowPanelWidth'); if(saved>0) host.style.setProperty('--rp-w', saved+'px');
+  const root=document.documentElement.style, panel=$('rowpanel');    // one width for the panel beside tables and query results
+  const saved=+getStored('rowPanelWidth'); if(saved>0) root.setProperty('--rp-w', saved+'px');
   makeResizer($('rp-resize'), {sign:-1, size:()=>panel.offsetWidth,
-    set:px=>{ const w=Math.round(Math.min(host.clientWidth*.8, Math.max(300, px))); host.style.setProperty('--rp-w', w+'px'); return w; },
-    save:px=>setStored('rowPanelWidth', px), reset:()=>{ host.style.removeProperty('--rp-w'); setStored('rowPanelWidth', undefined); }});
+    set:px=>{ const w=Math.round(Math.max(300, Math.min(rpHost().clientWidth-540, px))); root.setProperty('--rp-w', w+'px'); return w; },
+    save:px=>setStored('rowPanelWidth', px), reset:()=>{ root.removeProperty('--rp-w'); setStored('rowPanelWidth', undefined); }});
 }
 function rowPanelOpen(index){
   if(index<0||index>=S.total) return;
   const row=rowAt(index); if(!row) return;
   const isNew=RP.index<0;
   Object.assign(RP,{index,row,table:S.table});
-  $('rowpanel').style.top=vp.offsetTop+'px';    // below the toolbar and the slow-filter bar, when shown
-  $('rowpanel').hidden=false; $('v-rows').classList.add('rp-open');
+  $('rowpanel').hidden=false; rpHost().classList.add('rp-open');
   if(isNew) $('rp-search').value='';
   // keep the row in view as ↑/↓ move through the table
   if(S.scale<=1.0001){
@@ -1979,10 +2046,25 @@ function rowPanelOpen(index){
   if(isNew) $('rp-body').scrollTop=0;
   if(cutRows.has(row)) fullRow(index).then(full=>{ if(full && RP.index===index) rowPanelDraw(); }).catch(err=>{ if(RP.index===index) alertBox('Could not read the row',err.message); });    // a fresh panel starts at the first field; moving between rows keeps the place
 }
-function rowPanelClose(){
-  if(RP.index<0) return;
+// a table's rows always open with the first row in the panel, so every table has the same layout; a table without rows keeps the panel with "No rows";
+// a query result opens its first row the same way, and one without rows (UPDATE, DDL) has no panel
+function rowPanelAuto(){
+  if(S.local){ RP.index=-1; if(S.total) rowPanelOpen(0); else rowPanelClose(); return; }
+  if(!S.table) return;
+  if(!S.total){ rowPanelEmpty(); return; }
+  rowPanelOpen(0);
+}
+function rowPanelEmpty(){
   Object.assign(RP,{index:-1,row:null,table:''});
-  $('rowpanel').hidden=true; $('v-rows').classList.remove('rp-open');
+  $('rowpanel').hidden=false; rpHost().classList.add('rp-open');
+  $('rp-title').textContent=$('rp-title').title=S.table; $('rp-sub').textContent='';
+  for(const id of ['rp-prev','rp-next','rp-download','rp-delete']) $(id).disabled=true;
+  $('rp-body').textContent=''; $('rp-body').appendChild(el('div','rp-empty','No rows'));
+}
+function rowPanelClose(){
+  if(RP.index<0&&$('rowpanel').hidden) return;
+  Object.assign(RP,{index:-1,row:null,table:''});
+  $('rowpanel').hidden=true; rpHost().classList.remove('rp-open');
   $('rp-body').textContent='';
   lastFirst=-1; render(true);
 }
@@ -1997,19 +2079,18 @@ function rowDeleteBlock(row){
 }
 function rowPanelDraw(){
   const {index,row}=RP; if(index<0||!row) return;
-  const pkAt=S.pk?S.cols.indexOf(S.pk):-1;
-  $('rp-title').textContent=pkAt>=0?`${S.table}.${S.pk}`:(S.table||'Query result');    // table.key above, the key's value below with a copy icon
+  // the table (or Query result) above, which row under it: the same line for every table, keyed or not, and every result; the key itself is a field below
+  $('rp-title').textContent=S.table||'Query result';
   $('rp-title').title=$('rp-title').textContent;
-  const key=pkAt>=0?compactCellValue(row[pkAt]):'';
-  $('rp-key').hidden=pkAt<0; $('rp-keyval').textContent=key; $('rp-keyval').title=key;
-  $('rp-keycopy').onclick=()=>copyText(key,`${S.pk} copied`);
-  $('rp-prev').disabled=index<=0; $('rp-next').disabled=index>=S.total-1;
+  const page=!S.local&&S.pageIndex>0?`Page ${S.pageIndex+1} · `:'';
+  $('rp-sub').textContent=`${page}Row ${(index+1).toLocaleString()} of ${S.total.toLocaleString()}`;
+  $('rp-prev').disabled=index<=0; $('rp-next').disabled=index>=S.total-1; $('rp-download').disabled=false;
   const blocked=rowDeleteBlock(row);
   $('rp-delete').disabled=!!blocked; $('rp-delete').title=blocked||'Delete this row';
   const query=$('rp-search').value.trim().toLowerCase();
   const body=$('rp-body'); body.textContent='';
   // one line per column: name, type, value (cut to one line; a click opens the full value), with copy and edit on hover
-  const table=el('table','rp-table'), head=el('tr'), tbody=el('tbody');
+  const table=el('table','rp-table'+(S.meta?.columns?'':' no-types')), head=el('tr'), tbody=el('tbody');
   head.append(el('th','rp-col','Column'),el('th','rp-ty','Type'),el('th',null,'Value'));
   let shown=0;
   S.cols.forEach((column,c)=>{
@@ -2029,6 +2110,8 @@ function rowPanelDraw(){
     tbody.appendChild(field);
   });
   const thead=el('thead'); thead.appendChild(head); table.append(thead,tbody); body.appendChild(table);
+  const longest=Math.max(6,...S.cols.map(name=>name.length));    // 11.5px bold ≈ 7px a character, plus the cell's padding
+  table.style.setProperty('--rp-colw', Math.min(Math.round(body.clientWidth*.45), longest*7+24)+'px');
   if(!shown){ const empty=el('div','rp-empty','No field matches'); body.appendChild(empty); }
 }
 // one field's modal (from the row panel): the name with its type as subtext, Edit and Copy in the header, and the value drawn for its kind: JSON highlighted,
@@ -2287,7 +2370,11 @@ function openField(column,colIndex,row){
     const value=row[colIndex], body=$('dlg-b');
     $('dlg').classList.remove('structured','fm-editing');
     $('dlg-t').textContent='';
-    const title=el('span','title',column); if(facts) title.appendChild(el('span','dlg-type',facts));
+    const lines=typeof value==='string'?value.split('\n').length:1;
+    const size=value==null||kind==='bool'?'':Array.isArray(value)?`${value.length.toLocaleString()} ${value.length===1?'item':'items'}`
+      :kind==='bytes'?`${Math.max(0,(String(value).length-2)/2).toLocaleString()} bytes`
+      :kind==='number'||kind==='date'?'':`${String(kind==='json'?jsonText(value):value).length.toLocaleString()} characters${lines>1?` · ${lines.toLocaleString()} lines`:''}`;    // one place and one format for every field's size: the header
+    const title=el('span','title',column); title.appendChild(el('span','dlg-type',[facts,size].filter(Boolean).join(' · ')));
     const edit=iconButton('pencil',`Edit ${column}`), copy=iconButton('copy',`Copy ${column}`);
     const blocked=cellEditBlock(colIndex,row);    // a button that can't be used stays visible, disabled, with the reason on hover
     if(blocked){ edit.disabled=true; edit.title=blocked; }
@@ -2300,19 +2387,16 @@ function openField(column,colIndex,row){
     else if(kind==='json'){ $('dlg').classList.add('structured'); copyText_=prettyJson(jsonText(value)); pre('','json').innerHTML=highlightJsonText(copyText_).slice(0,-1); }
     else if(kind==='array'&&Array.isArray(value)){
       copyText_=pgArray(value);
-      sub(value.length?`${value.length} item${value.length===1?'':'s'}`:'Empty array');
+      if(!value.length) sub('Empty array');
       if(value.length){ const list=el('div','fm-list'); value.forEach((x,i)=>{ const r=el('div'); r.append(el('b',null,String(i+1)),el('span',x===null?'null':null,x===null?'NULL':typeof x==='object'?JSON.stringify(x):String(x))); list.appendChild(r); }); body.appendChild(list); }
     }
     else if(kind==='bool'){ const on=value===true||value==='t'||value==='true'; body.appendChild(el('span','fm-bool '+(on?'t':'f'),on?'true':'false')); copyText_=String(on); }
     else{
       copyText_=String(value); pre(copyText_);
-      const extra=[], lines=copyText_.split('\n').length;
+      const extra=[];    // what the header's size doesn't say: the local time, a number formatted
       if(kind==='date'){ const d=new Date(String(value).replace(' ','T')); if(!Number.isNaN(+d)) extra.push(['Your time',d.toLocaleString()],['When',ago(d)]); }
       else if(kind==='number'){ const n=Number(value); const f=Number.isFinite(n)?n.toLocaleString(undefined,{maximumFractionDigits:20}):''; if(f&&f!==copyText_) extra.push(['Formatted',f]); }    // only when it reads differently
-      else if(kind==='bytes') extra.push(['Size',`${Math.max(0,(copyText_.length-2)/2).toLocaleString()} bytes`]);
-      else extra.push(['Length',`${copyText_.length.toLocaleString()} characters${lines>1?` · ${lines} lines`:''}`]);
-      if(kind==='text') sub(extra[0][1]);    // long text keeps the room: its length only
-      else body.appendChild(details(extra));
+      body.appendChild(details(extra));
     }
     copy.onclick=()=>copyText(copyText_,`${column} copied`);
     edit.onclick=editor;
@@ -2360,7 +2444,6 @@ function openField(column,colIndex,row){
   view();
   $('dlg').showModal();
 }
-$('rp-close').onclick=rowPanelClose;
 $('rp-prev').onclick=()=>rowPanelOpen(RP.index-1);
 $('rp-next').onclick=()=>rowPanelOpen(RP.index+1);
 $('rp-search').oninput=rowPanelDraw;
@@ -2388,191 +2471,138 @@ $('rp-delete').onclick=()=>{
     }
   };
 };
-document.addEventListener('pointerdown', e=>{
-  if(RP.index<0||$('dlg').open) return;
-  const t=e.target;
-  if($('rowpanel').contains(t)||$('dlg').contains(t)||t.closest?.('#rows .td,.grip,#toast')) return;    // a cell switches rows, a grip resizes a column
-  if(t===vp&&(e.offsetX>=vp.clientWidth||e.offsetY>=vp.clientHeight)) return;    // the grid's scrollbars scroll
-  rowPanelClose();
-});
 document.addEventListener('keydown', e=>{
-  if(RP.index<0||$('dlg').open||!$('moremenu').hidden||!$('v-rows').classList.contains('on')) return;    // Esc closes an open More menu first
+  if(RP.index<0||$('dlg').open||!$('moremenu').hidden||!rpHost().closest('.view')?.classList.contains('on')) return;    // Esc closes an open More menu first
   if(e.target.closest('input,textarea,select,[contenteditable]')) return;
-  if(e.key==='Escape'){ rowPanelClose(); e.preventDefault(); }
-  else if(e.key==='ArrowDown'){ rowPanelOpen(RP.index+1); e.preventDefault(); }
+  if(e.key==='ArrowDown'){ rowPanelOpen(RP.index+1); e.preventDefault(); }
   else if(e.key==='ArrowUp'){ rowPanelOpen(RP.index-1); e.preventDefault(); }
 });
 
-/* ==== filter ==== */
-let currentColumns = [];
-
-function syncFcolBtnText(){
-  const val = $('fcol').value;
-  $('fcol-btn-text').textContent = val || 'Select column';
-}
-
-function renderFcolPicker(columns){
-  currentColumns = columns || [];
-  syncFcolBtnText();
-  renderFcolList('');
-}
-
-function renderFcolList(term = ''){
-  const list = $('fcol-list');
-  if(!list) return;
-  list.innerHTML = '';
-  const q = term.trim().toLowerCase();
-  const filtered = q ? currentColumns.filter(c => (c.name||'').toLowerCase().includes(q) || (c.type||'').toLowerCase().includes(q)) : currentColumns;
-  if(!filtered.length){
-    list.innerHTML = '<div class="fcol-empty">No matching columns</div>';
-    return;
-  }
-  const selected = $('fcol').value;
-  for(let i = 0; i < filtered.length; i++){
-    const col = filtered[i];
-    const item=el('div');
-    item.className = 'fcol-item' + (col.name === selected ? ' selected' : '') + (i === 0 && q ? ' active' : '');
-    item.dataset.col = col.name;
-    item.append(el('span','col-name',col.name));    // the name only: in full, the type is in Structure
-    item.onclick = (e) => {
-      e.stopPropagation();
-      selectFcol(col.name);
-    };
-    list.appendChild(item);
-  }
-}
-
-function selectFcol(colName){
-  if(!colName) return;
-  $('fcol').value = colName;
-  syncFcolBtnText();
-  closeFcolMenu();
-  $('fcol').onchange?.();
-}
-
-function openFcolMenu(){
-  $('fcol-menu').hidden = false;
-  $('fcol-btn').setAttribute('aria-expanded', 'true');
-  $('fcol-search').value = '';
-  renderFcolList('');
-  setTimeout(() => $('fcol-search').focus(), 20);
-}
-
-function closeFcolMenu(){
-  $('fcol-menu').hidden = true;
-  $('fcol-btn').setAttribute('aria-expanded', 'false');
-}
-
-function toggleFcolMenu(){
-  if($('fcol-menu').hidden) openFcolMenu();
-  else closeFcolMenu();
-}
-
-$('fcol-btn').onclick = (e) => {
-  e.stopPropagation();
-  toggleFcolMenu();
-};
-
-$('fcol-search').oninput = () => {
-  renderFcolList($('fcol-search').value);
-};
-
-$('fcol-search').onkeydown = (e) => {
-  const items = Array.from($('fcol-list').querySelectorAll('.fcol-item'));
-  if(!items.length) return;
-  const active = $('fcol-list').querySelector('.fcol-item.active');
-  let idx = items.indexOf(active);
-  if(e.key === 'ArrowDown'){
-    e.preventDefault();
-    if(active) active.classList.remove('active');
-    idx = (idx + 1) % items.length;
-    items[idx].classList.add('active');
-    items[idx].scrollIntoView({block:'nearest'});
-  }else if(e.key === 'ArrowUp'){
-    e.preventDefault();
-    if(active) active.classList.remove('active');
-    idx = (idx - 1 + items.length) % items.length;
-    items[idx].classList.add('active');
-    items[idx].scrollIntoView({block:'nearest'});
-  }else if(e.key === 'Enter'){
-    e.preventDefault();
-    const target = active || items[0];
-    if(target && target.dataset.col){
-      selectFcol(target.dataset.col);
-    }
-  }else if(e.key === 'Escape'){
-    e.preventDefault();
-    closeFcolMenu();
-    $('fcol-btn').focus();
-  }
-};
-
-document.addEventListener('click', (e) => {
-  if(!e.target.closest('#fcol-picker')) closeFcolMenu();
-});
-
+/* ==== filter: up to FILTER_MAX conditions joined with AND or OR, edited in the Filter rows dialog ==== */
+// S.filters holds what is applied, as typed: [{col, op (as shown, e.g. ≠), val}]; S.filterJoin 'and' or 'or'. The header's filter icon is blue while one is on and the red clear icon removes them all.
+const FILTER_MAX=10;
 const OPS={'=':'=','≠':'<>','>':'>','<':'<','≥':'>=','≤':'<=','LIKE':'LIKE','ILIKE':'ILIKE',
            'IS NULL':'IS NULL','IS NOT NULL':'IS NOT NULL'};
-function filterOperators(){
-  const type=(S.meta?.columns.find(c=>c.name===$('fcol').value)?.type||'').toLowerCase();
+function filterOperators(column){
+  const type=(S.meta?.columns.find(c=>c.name===column)?.type||'').toLowerCase();
   if(/char|text|citext/.test(type)) return ['ILIKE','LIKE','=','≠','IS NULL','IS NOT NULL'];
   if(/int|numeric|decimal|real|double|serial|date|time|timestamp|interval|money/.test(type))
     return ['=','≠','>','<','≥','≤','ILIKE','LIKE','IS NULL','IS NOT NULL'];
   return ['=','≠','ILIKE','LIKE','IS NULL','IS NOT NULL'];
 }
-function drawFilterOps(keep=true){
-  const previous=keep ? $('fop').value : S.filterApplied.op;
-  const choices=filterOperators();
-  $('fop').innerHTML=choices.map(op=>`<option>${op}</option>`).join('');
-  $('fop').value=choices.includes(previous) ? previous : choices[0];
-  const noValue=$('fop').value.startsWith('IS ');
-  $('fval').disabled=noValue; $('fval').placeholder=noValue?'No value required':/LIKE$/.test($('fop').value)?'Contains (% for a pattern)':'Filter value';
+// what the server gets: the SQL operator, and LIKE/ILIKE without a % meaning "contains"
+function filterForApi(f){
+  const op=OPS[f.op], value=/LIKE$/.test(op)&&f.val&&!f.val.includes('%')?`%${f.val}%`:f.val;
+  return op.startsWith('IS ')?{col:f.col,op}:{col:f.col,op,value};
 }
-function filterChanged(){
-  return $('fcol').value!==S.filterApplied.col || $('fop').value!==S.filterApplied.op ||
-    $('fval').value!==S.filterApplied.val;
-}
+const filterText=f=>`${f.col} ${f.op}${f.op.startsWith('IS ')?'':' '+f.val}`;
 function drawFilterActions(){
-  $('fgo').hidden=$('fclr').hidden=!(filterChanged() || S.where);
+  const on=S.filters.length>0;
+  $('filterbtn').classList.toggle('on',on);
+  $('filterbtn').title=on?`${on&&S.filters.length===1?'1 condition':S.filters.length+' conditions'} applied: click to see or edit`:'Filter rows';
+  $('fclearbtn').disabled=!on;
+  $('fclearbtn').title=on?'Clear the filter':'No filter applied';
 }
-$('fcol').onchange=()=>{ syncFcolBtnText(); drawFilterOps(); drawFilterActions(); };
-$('fop').onchange=()=>{ drawFilterOps(); drawFilterActions(); };
-$('fval').oninput=drawFilterActions;
-$('fgo').onclick = async () => {
-  const col=$('fcol').value, op=OPS[$('fop').value], typed=$('fval').value;
-  if(!col) return;
-  const val=/LIKE$/.test(op)&&typed&&!typed.includes('%')?`%${typed}%`:typed;    // LIKE/ILIKE without % means contains
-  const previous=S.where;
-  S.where=!val&&!op.startsWith('IS')?null:{col,op,val};
-  if(await applyFilter()){
-    S.filterApplied={col,op:$('fop').value,val:typed}; drawFilterActions();
-  }else S.where=previous;
-};
-$('fclr').onclick = async () => {
-  if(filterChanged()){
-    $('fcol').value=S.filterApplied.col; syncFcolBtnText(); drawFilterOps(false);
-    $('fop').value=S.filterApplied.op; drawFilterOps();
-    $('fval').value=S.filterApplied.val; drawFilterActions();
-    return;
+// one condition row of the dialog: the column box searches the table's columns (colMenu), the operators follow the column's type
+function filterRow(f={col:'',op:'',val:''}){
+  const row=el('div','fd-row'), col=el('input','fd-col'), op=el('select','fd-op'), val=el('input','fd-val'), del=iconButton('trash','Remove this condition','iconbtn fd-del');
+  col.placeholder='Search a column'; col.autocomplete='off'; col.spellcheck=false; col.value=f.col; col.setAttribute('role','combobox'); col.setAttribute('aria-controls','fcolmenu');
+  val.autocomplete='off'; val.value=f.val||'';
+  const ops=()=>{ const previous=op.value||f.op, choices=filterOperators(col.value); op.innerHTML=choices.map(o=>`<option>${o}</option>`).join(''); op.value=choices.includes(previous)?previous:choices[0];
+    const noValue=op.value.startsWith('IS '); val.disabled=noValue; val.placeholder=noValue?'No value needed':/LIKE$/.test(op.value)?'Contains (% for a pattern)':'Value'; };
+  col.oninput=()=>{ col.classList.remove('bad'); ops(); colMenuDraw(col,true); };
+  col.onchange=ops;
+  col.onclick=()=>colMenuDraw(col);    // the list opens on a click, typing or ↓, not just because the box has the focus
+  col.onblur=()=>setTimeout(()=>{ if(colMenu.input===col&&document.activeElement!==col) colMenuClose(); },0);
+  col.onkeydown=colMenuKey;
+  op.onchange=ops;
+  del.onclick=()=>{ row.remove(); if(!$('fconds').children.length) $('fconds').appendChild(filterRow()); drawFilterDialog(); };
+  ops();
+  row.append(col,op,val,del);
+  return row;
+}
+const filterJoin=()=>$('fjoin').querySelector('.on')?.dataset.join||'and';
+function setFilterJoin(join){ for(const b of $('fjoin').children){ b.classList.toggle('on',b.dataset.join===join); b.setAttribute('aria-checked',String(b.dataset.join===join)); } }
+for(const b of $('fjoin').children) b.onclick=()=>setFilterJoin(b.dataset.join);
+// the column box: typing searches the table's columns (anywhere in the name) in a short list under it; ↑/↓ move, Enter or a click picks, Esc closes the list
+const colMenu={input:null,index:0,items:[]};
+function colMenuDraw(input,typed=false){    // typed: narrow by what is typed; opening shows every column with the current one marked
+  const box=$('fcolmenu'), term=typed?input.value.trim().toLowerCase():'';
+  colMenu.input=input; colMenu.items=(S.meta?.columns||[]).filter(c=>!term||c.name.toLowerCase().includes(term));
+  colMenu.index=typed&&term?0:colMenu.items.findIndex(c=>c.name===input.value);    // nothing marked until the user types, uses the arrows, or the box already holds a column
+  box.replaceChildren(...(colMenu.items.length?colMenu.items.map((c,i)=>{ const item=el('div',i===colMenu.index?'on':''); item.append(el('span',null,c.name),el('small',null,c.type)); item.title=`${c.name} · ${c.type}`;
+    item.onmousedown=e=>{ e.preventDefault(); colMenuPick(i); }; return item; }):[el('div','none','No matching columns')]));
+  const r=input.getBoundingClientRect();
+  Object.assign(box.style,{left:r.left+'px',top:(r.bottom+4)+'px',minWidth:Math.max(r.width,220)+'px'});
+  box.hidden=false;
+  box.children[colMenu.index]?.scrollIntoView({block:'nearest'});
+}
+function colMenuClose(){ $('fcolmenu').hidden=true; colMenu.input=null; }
+function colMenuPick(i){
+  const input=colMenu.input, column=colMenu.items[i]; if(!input||!column) return;
+  input.value=column.name; input.classList.remove('bad'); input.dispatchEvent(new Event('change')); colMenuClose();
+  input.closest('.fd-row').querySelector('.fd-op').focus();
+}
+function colMenuKey(e){
+  const open=!$('fcolmenu').hidden&&colMenu.input===e.target;
+  if(e.key==='ArrowDown'||e.key==='ArrowUp'){
+    e.preventDefault(); if(!open){ colMenuDraw(e.target); return; }
+    colMenu.index=colMenu.index<0?0:Math.min(colMenu.items.length-1,Math.max(0,colMenu.index+(e.key==='ArrowDown'?1:-1)));
+    [...$('fcolmenu').children].forEach((item,i)=>item.classList.toggle('on',i===colMenu.index)); $('fcolmenu').children[colMenu.index]?.scrollIntoView({block:'nearest'});
+  }else if(e.key==='Enter'&&open&&colMenu.index>=0){ e.preventDefault(); e.stopPropagation(); colMenuPick(colMenu.index); }
+  else if(e.key==='Escape'&&open){ e.preventDefault(); e.stopPropagation(); colMenuClose(); }    // closes the list, not the dialog
+}
+$('fdlg').addEventListener('close',colMenuClose);
+$('fconds').addEventListener('scroll',colMenuClose,true);
+function drawFilterDialog(){
+  const count=$('fconds').children.length;
+  $('faddcond').disabled=count>=FILTER_MAX; $('faddcond').title=count>=FILTER_MAX?`At most ${FILTER_MAX} conditions`:'';
+  $('fclr').hidden=!S.filters.length;
+}
+function openFilterDialog(){
+  if(!S.table||S.local) return;
+  setFilterJoin(S.filterJoin);
+  $('fconds').replaceChildren(...(S.filters.length?S.filters:[{col:'',op:'',val:''}]).map(f=>filterRow(f)));    // opens on what is applied
+  drawFilterDialog();
+  $('fdlg').showModal();
+  const first=$('fconds').querySelector('.fd-row:last-child');
+  (first.querySelector('.fd-col').value?(first.querySelector('.fd-val:not(:disabled)')||first.querySelector('.fd-col')):first.querySelector('.fd-col')).focus();
+}
+async function setFilters(filters,join){
+  const previous=[S.filters,S.filterJoin];
+  S.filters=filters; S.filterJoin=join;
+  if(await applyFilter()){ drawFilterActions(); return true; }
+  [S.filters,S.filterJoin]=previous; return false;
+}
+$('faddcond').onclick=()=>{ if($('fconds').children.length>=FILTER_MAX) return; const row=filterRow(); $('fconds').appendChild(row); drawFilterDialog(); row.querySelector('.fd-col').focus(); };
+$('fgo').onclick=async()=>{
+  const columns=new Set(S.cols), filters=[]; let bad=null;
+  for(const row of $('fconds').children){
+    const col=row.querySelector('.fd-col'), op=row.querySelector('.fd-op').value, val=row.querySelector('.fd-val').value;
+    if(!col.value.trim()&&!val.trim()) continue;    // an empty row is left out
+    if(!columns.has(col.value)){ col.classList.add('bad'); bad||=col; continue; }
+    if(!op.startsWith('IS ')&&val==='') { row.querySelector('.fd-val').focus(); return; }
+    filters.push({col:col.value,op,val});
   }
-  if(S.where){
-    S.where=null; $('fval').value='';
-    if(await applyFilter()) S.filterApplied={col:$('fcol').value,op:$('fop').value,val:''};
-    syncFcolBtnText();
-    drawFilterActions();
-  }
+  if(bad){ bad.focus(); return; }
+  if(await setFilters(filters,filterJoin())) $('fdlg').close();
 };
+$('fclr').onclick=async()=>{ if(await setFilters([],'and')) $('fdlg').close(); };
+$('filterbtn').onclick=openFilterDialog;
+$('fclearbtn').onclick=()=>setFilters([],'and');
+$('fdlg').addEventListener('keydown',e=>{ if(e.key==='Enter'&&e.target.matches('.fd-col,.fd-val')){ e.preventDefault(); $('fgo').click(); } });
+$('fdlg').querySelector('form').addEventListener('submit',e=>{ if(e.submitter?.value!=='cancel') e.preventDefault(); });    // only Cancel (or Esc) closes it; Enter applies
 // a %text% LIKE/ILIKE filter cannot use a normal index, so Postgres reads every row; when that is slow, say so and offer the index that fixes it
 function drawSlowFilterHint(ms){
-  const w=S.where, el=$('fslow');
-  const slow=!!w&&/LIKE$/.test(w.op)&&String(w.val).startsWith('%')&&ms>=100;    // 100 ms: about where a delay is noticeable
-  el.hidden=!slow; el.textContent=''; if(!slow) return;
+  const w=S.filters.map(filterForApi).find(f=>/LIKE$/.test(f.op)&&String(f.value).startsWith('%')), box=$('fslow');    // not 'el': that would hide the el() helper used below
+  const slow=!!w&&ms>=100;    // 100 ms: about where a delay is noticeable
+  box.hidden=!slow; box.textContent=''; if(!slow) return;
   const ident=name=>'"'+String(name).replace(/"/g,'""')+'"';
   const sql=`CREATE EXTENSION IF NOT EXISTS pg_trgm;\nCREATE INDEX ON ${ident(S.table)} USING gin (${ident(w.col)} gin_trgm_ops);`;
   const text=el('span',null,`Full scan: ${Math.round(ms)} ms. A trigram index makes %text% search fast.`); text.title=sql;
   const copy=el('button'); copy.type='button'; copy.textContent='Copy SQL'; copy.title=sql;
   copy.onclick=()=>copyText(sql,'Index SQL copied');
-  el.append(text,copy);
+  box.append(text,copy);
 }
 async function applyFilter(){
   const seq=++rowsSeq;    // the rows shown stay until the filtered page arrives: a failed filter leaves them as they were
@@ -2583,16 +2613,18 @@ async function applyFilter(){
     S.rows=first.rows; lastFirst=-1; markCut(first);
     S.total=first.rows.length; S.after=first.after; S.cursors=[null]; S.pageIndex=0;
     drawSlowFilterHint(first.ms);
-    drawBatchNav(); buildGrid(); vp.scrollTop=0; render(true);
+    drawBatchNav(); buildGrid(); vp.scrollTop=0; render(true); rowPanelAuto();
     return true;
   }catch(err){ if(seq!==rowsSeq) return false; alertBox('Filter failed', err.message); return false; }
 }
-$('fval').onkeydown = e => { if(e.key==='Enter') $('fgo').click(); };
 
 /* ==== query ==== */
 function mountGrid(host){
   if(vp.parentElement!==host) host.append(vp, $('empty'));
+  const panelHost=host===$('qcard')?$('qres'):$('v-rows');    // the row panel goes with the grid: beside a table's card or a query result
+  if($('rowpanel').parentElement!==panelHost){ $('rowpanel').parentElement.classList.remove('rp-open'); panelHost.append($('rowpanel')); if(!$('rowpanel').hidden) panelHost.classList.add('rp-open'); }
 }
+const rpHost=()=>$('rowpanel').parentElement;
 function hideQueryError(){ $('qerror').hidden=true; }
 function showQueryError(title,message){
   $('qerrortitle').textContent=title; $('qerrorbody').textContent=message; $('qerror').hidden=false;
@@ -2600,9 +2632,7 @@ function showQueryError(title,message){
   $('qerrorcopy').innerHTML=icon('copy');
   $('qerrorcopy').onclick=()=>copyText(message,'Error copied');
 }
-function setExports(on){
-  for(const b of document.querySelectorAll('#qbar .export')) b.disabled=!on;
-}
+function setExports(on){ $('qdownload').hidden=!on; }    // the result card's download icon shows only while a result is in the table
 // a value in full for a file (never the grid's shortened preview): arrays as {a,b}, objects as JSON
 const fileText=value=>value==null?'':Array.isArray(value)?pgArray(value):typeof value==='object'?JSON.stringify(value):String(value);
 const csvCell=value=>'"'+fileText(value).replace(/"/g,'""')+'"';
@@ -2632,7 +2662,7 @@ async function refreshTableData(){
     drawStObj(S.table);
     $('st-rows').textContent = `${m.rows.length} rows loaded`;
     $('st-size').textContent = m.meta?.stats?.total_size || '';
-    drawBatchNav(); buildGrid(); vp.scrollTop=0; render(true);
+    drawBatchNav(); buildGrid(); vp.scrollTop=0; render(true); rowPanelAuto();
     S.loaded = {};
     const activeTab = document.querySelector('.tab.on')?.dataset?.v;
     if(activeTab === 'struct'){
@@ -2685,8 +2715,8 @@ $('rp-download').onclick=()=>{
 $('rowcsv').onclick=()=>{
   const rows=S.local||S.rows, filename=`${safeFilePart(S.table)}-rows.csv`;
   const cut=S.local?0:S.rows.filter(row=>cutRows.has(row)).length;
-  const where=S.where?`${S.where.col} ${S.where.op}${S.where.op.startsWith('IS')?'':' '+S.where.val}`:'None';
-  const whole=!S.local&&!S.where&&!S.after&&!S.pageIndex;    // one page and no filter: the file is the whole table
+  const where=S.filters.length?S.filters.map(filterText).join(S.filterJoin==='or'?' OR ':' AND '):'None';
+  const whole=!S.local&&!S.filters.length&&!S.after&&!S.pageIndex;    // one page and no filter: the file is the whole table
   confirmDownload('Download rows',
     [['Rows',whole?`${rows.length.toLocaleString()} (the whole table)`:`${rows.length.toLocaleString()} (Page ${S.pageIndex+1}, page size ${S.pageSize})`],['Columns',`${S.cols.length} (all)`],
      ['Filter',where],['Order',S.pk?`${S.pk} ${S.latestFirst?'newest first':'oldest first'}`:'As loaded'],['File',filename]],
@@ -2713,11 +2743,78 @@ for(const button of document.querySelectorAll('.detail-download')) button.onclic
     data.length<total?'Only the rows the search and filters show.':'',
     ()=>{ downloadCsv(headers,data,filename); toast(`Downloaded ${countOf(data.length,'row','rows')}`); });
 };
-function exportResult(format){
+// the query runner downloads two ways: Download (before Execute) streams every row the query returns straight to a file (CSV, SQL dump, SQL INSERTs or JSON Lines, optionally gzipped), never shown, without a row limit;
+// the result card's download icon saves those rows as CSV, JSON or XML
+function downloadDialog(title,subtitle,note,choices,defaultName,run){
+  $('dlg-t').textContent='';
+  const head=el('span','title',title); head.appendChild(el('span','dlg-type',subtitle)); $('dlg-t').appendChild(head);
+  const body=$('dlg-b'); body.textContent='';
+  if(note){ const p=el('p','dlg-note dl-lead'); if(Array.isArray(note)){ p.append(el('b',null,note[0]),document.createTextNode(' '+note[1])); } else p.textContent=note; body.appendChild(p); }    // [bold lead, rest] or text
+  let pick=()=>'csv';
+  if(choices){
+    const box=el('div','dl-choice'), wrap=el('div','dl-formats'); box.appendChild(el('b',null,'Format'));
+    for(const f of choices){ const l=el('label'), r=el('input'); r.type='radio'; r.name='dlfmt'; r.value=f; r.checked=f==='csv'; l.append(r,document.createTextNode(f.toUpperCase())); wrap.appendChild(l); }
+    box.appendChild(wrap); body.appendChild(box);
+    pick=()=>body.querySelector('input[name="dlfmt"]:checked').value;
+  }
+  const nameBox=el('div','dl-choice'), name=el('input'); nameBox.appendChild(el('b',null,'File name')); name.id='dlname'; name.autocomplete='off'; name.spellcheck=false; name.value=`${defaultName}.csv`; nameBox.appendChild(name); body.appendChild(nameBox);
+  body.onchange=()=>{ name.value=`${name.value.replace(/\.(csv|json|xml)$/i,'')||defaultName}.${pick()}`; };    // the name follows the format
+  $('dlg-f').innerHTML='<button value="cancel">Cancel</button><button class="primary" type="button" id="dlgo">Download</button>';
+  $('dlg').showModal(); name.focus(); name.select();
+  name.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('dlgo').click(); } });
+  $('dlgo').onclick=()=>{ const format=pick(), raw=name.value.trim()||`${defaultName}.${format}`; $('dlg').close(); run(format,raw.toLowerCase().endsWith('.'+format)?raw:`${raw}.${format}`); };
+}
+// Download's formats: CSV, two SQL files another PostgreSQL loads (COPY as pg_dump writes it, or INSERT statements for any client), JSON Lines; any of them gzipped
+const STREAM_FORMATS=[
+  {id:'csv',ext:'csv',name:'CSV',hint:'Spreadsheets and import tools; \\copy t from file.csv csv header'},
+  {id:'copy',ext:'sql',name:'SQL dump (COPY)',hint:'For another PostgreSQL: psql -d db -f file.sql; the fastest to load, as pg_dump writes it'},
+  {id:'insert',ext:'sql',name:'SQL INSERTs',hint:'For another PostgreSQL through any SQL client (psql, pgAdmin, DBeaver, this page)'},
+  {id:'jsonl',ext:'jsonl',name:'JSON Lines',hint:'One JSON object a line, for scripts and other tools'}];
+// the table a SQL file loads into: the query's first FROM (or TABLE) name, without quotes, else query_result
+function sqlTableGuess(sql){
+  const m=/\b(?:from|table)\s+((?:"[^"]+"|[\w$]+)(?:\s*\.\s*(?:"[^"]+"|[\w$]+))?)/i.exec(sql.replace(/--[^\n]*|\/\*[\s\S]*?\*\//g,' '));
+  const name=m?m[1].replace(/\s+/g,'').replace(/"/g,''):'';
+  return /^(pg_catalog|information_schema)\./i.test(name)||/^pg_/i.test(name)?name.replace(/^.*\./,''):name.replace(/^public\./i,'');
+}
+function openStreamDialog(){
+  const sql=$('sql').value.trim(); if(!sql) return;
+  const guess=sqlTableGuess(sql), base=safeFilePart(guess||`query-result-${S.db||'export'}`);
+  $('dlg-t').textContent='';
+  const head=el('span','title','Download'); head.appendChild(el('span','dlg-type','Every row · no row limit')); $('dlg-t').appendChild(head);
+  const body=$('dlg-b'); body.textContent='';
+  const lead=el('p','dlg-note dl-lead'); lead.append(el('b',null,'No row limit.'),document.createTextNode(' The query runs on the server and every row it returns streams straight to the file, millions of rows included; nothing is shown in the table.')); body.appendChild(lead);
+  const fmtBox=el('div','dl-choice'); fmtBox.appendChild(el('b',null,'Format'));
+  for(const f of STREAM_FORMATS){
+    const l=el('label','dl-opt'), radio=el('input'); radio.type='radio'; radio.name='dlfmt'; radio.value=f.id; radio.checked=f.id==='csv';
+    const text=el('span'); text.append(el('span','dl-opt-name',f.name),el('span','dl-opt-hint',f.hint)); l.append(radio,text); fmtBox.appendChild(l);
+  }
+  body.appendChild(fmtBox);
+  const sqlBox=el('div','dl-choice dl-sql'); sqlBox.appendChild(el('b',null,'Load into table'));
+  const table=el('input'); table.id='dltable'; table.autocomplete='off'; table.spellcheck=false; table.value=guess||'query_result'; table.placeholder='query_result';
+  const create=el('input'), createLabel=el('label','dl-check'); create.type='checkbox'; create.checked=true; createLabel.append(create,document.createTextNode('Include CREATE TABLE (the query\'s columns and types; no keys or indexes)'));
+  sqlBox.append(table,createLabel); body.appendChild(sqlBox);
+  const gzip=el('input'), gzipLabel=el('label','dl-check'); gzip.type='checkbox'; gzipLabel.append(gzip,document.createTextNode('Compress with gzip (.gz, often 5× smaller)'));
+  const gzBox=el('div','dl-choice'); gzBox.appendChild(gzipLabel); body.appendChild(gzBox);
+  const nameBox=el('div','dl-choice'), name=el('input'); nameBox.appendChild(el('b',null,'File name')); name.id='dlname'; name.autocomplete='off'; name.spellcheck=false; nameBox.appendChild(name); body.appendChild(nameBox);
+  const pick=()=>STREAM_FORMATS.find(f=>f.id===body.querySelector('input[name="dlfmt"]:checked').value);
+  const ext=()=>pick().ext+(gzip.checked?'.gz':'');
+  const strip=v=>v.replace(/\.(csv|sql|jsonl)(\.gz)?$/i,'');
+  const sync=()=>{ const f=pick(); sqlBox.hidden=f.id!=='copy'&&f.id!=='insert'; name.value=`${strip(name.value.trim())||base}.${ext()}`; };    // the name follows the format and gzip
+  name.value=`${base}.csv`; sync();
+  body.onchange=e=>{ if(e.target!==name&&e.target!==table) sync(); };
+  $('dlg-f').innerHTML='<button value="cancel">Cancel</button><button class="primary" type="button" id="dlgo">Download</button>';
+  $('dlg').showModal(); name.focus(); name.select();
+  body.onkeydown=e=>{ if(e.key==='Enter'&&e.target.tagName==='INPUT'&&e.target.type!=='checkbox'&&e.target.type!=='radio'){ e.preventDefault(); $('dlgo').click(); } };
+  $('dlgo').onclick=()=>{
+    const f=pick(), raw=name.value.trim()||`${base}.${ext()}`, filename=raw.toLowerCase().endsWith('.'+ext())?raw:`${strip(raw)}.${ext()}`;
+    $('dlg').close();
+    streamQuery(false,filename,{file_format:f.id,table_name:table.value.trim()||'query_result',is_create:create.checked,gzip:gzip.checked});
+  };
+}
+function openResultDialog(){
   if(!S.local) return;
-  const rows=S.local, cols=S.cols, filename=`query-result.${format}`;
-  confirmDownload(`Download ${format.toUpperCase()}`,[['Rows',`${rows.length.toLocaleString()} (the result shown)`],['Columns',String(cols.length)],['File',filename]],
-    'Only the rows the result shows; Download gives every row the query returns.',()=>{ saveResult(format,rows,cols,filename); toast(`Downloaded ${countOf(rows.length,'row','rows')}`); },'Query result');
+  downloadDialog('Download result',`${countOf(S.local.length,'row','rows')} shown`,S.localTruncated?'Only the rows in the table; the query returns more. Download (before Execute) streams every row.':'',
+    ['csv','json','xml'],`query-result-${safeFilePart(S.db||'export')}`,(format,filename)=>{ saveResult(format,S.local,S.cols,filename); toast(`Downloaded ${countOf(S.local.length,'row','rows')}`); });
 }
 function saveResult(format,rows,cols,filename){
   const objects=rows.map(row=>Object.fromEntries(cols.map((col,i)=>[col,row[i]])));
@@ -2735,35 +2832,8 @@ function saveResult(format,rows,cols,filename){
   }
   saveFile(text,type,filename);
 }
-for(const b of document.querySelectorAll('#qbar .export')) b.onclick=()=>exportResult(b.dataset.format);
 const streamSize=bytes=>bytes<1024 ? `${bytes} B` : bytes<1048576 ? `${(bytes/1024).toFixed(1)} KB` : `${(bytes/1048576).toFixed(1)} MB`;
-function promptStreamFilename(){
-  return new Promise((resolve)=>{
-    const defaultName=`query-result-${safeFilePart(S.db||'export')}.csv`;
-    $('dlg-t').textContent='Download CSV';
-    $('dlg-b').innerHTML=`<div style="display:flex;flex-direction:column;gap:8px">
-      <label for="sfname" style="font-size:12px;color:var(--dim)">Save file as:</label>
-      <input id="sfname" type="text" value="" style="width:100%;height:32px;padding:4px 9px;box-sizing:border-box" autocomplete="off" spellcheck="false"/>
-      <span style="font-size:11px;color:var(--dim)">Downloads every row this query returns as a CSV file, without a row limit.</span>
-    </div>`;
-    $('dlg-f').innerHTML='<button value="cancel">Cancel</button><button class="primary" type="button" id="streamgo">Save CSV</button>';
-    $('dlg').showModal();
-    const inp=$('sfname'); inp.value=defaultName; inp.focus(); inp.select();    // set as a value, never markup: a database name may hold " or <
-    inp?.addEventListener('keydown',e=>{ if(e.key==='Enter'){ e.preventDefault(); $('streamgo').click(); } });
-    let resolved=false;
-    $('streamgo').onclick=()=>{
-      resolved=true;
-      const val=inp?.value.trim()||defaultName;
-      $('dlg').close();
-      resolve(val.endsWith('.csv')?val:`${val}.csv`);
-    };
-    $('dlg').addEventListener('close',function onClose(){
-      $('dlg').removeEventListener('close',onClose);
-      if(!resolved) resolve(null);
-    },{once:true});
-  });
-}
-async function streamQuery(confirmed=false){
+async function streamQuery(confirmed=false,filename='',options={file_format:'csv'}){
   const sql=$('sql').value.trim(); if(!sql) return;
   hideQueryError();
   const normalized=sql.toLowerCase().replace(/\s+/g,' ').trim();
@@ -2773,10 +2843,9 @@ async function streamQuery(confirmed=false){
     $('dlg-b').textContent='This query can affect every row. Run it and download the rows it returns?';
     $('dlg-f').innerHTML='<button value="cancel">Cancel</button><button class="primary" id="streamyes">Run and download</button>';
     $('dlg').showModal();
-    $('streamyes').onclick=e=>{ e.preventDefault(); $('dlg').close(); streamQuery(true); };
+    $('streamyes').onclick=e=>{ e.preventDefault(); $('dlg').close(); streamQuery(true,filename,options); };
     return;
   }
-  const filename=await promptStreamFilename();
   if(!filename) return;
 
   $('stream').disabled=true; $('streamprogress').hidden=false; $('streambar').removeAttribute('value');
@@ -2784,19 +2853,19 @@ async function streamQuery(confirmed=false){
   let bytes=0, chunks=[];
   try{
     const response=await fetch('/pgweb',{method:'POST',headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({action:'stream',sql,is_confirmed:confirmed?1:0,is_read_only:S.readOnly?1:0})});
+      body:JSON.stringify({action:'stream',sql,is_confirmed:confirmed?1:0,is_read_only:S.readOnly?1:0,file_format:options.file_format||'csv',table_name:options.table_name||'',is_create:options.is_create===false?0:1})});
     if(!response.ok){
       let message=response.statusText||'stream failed';
       try{ const body=await response.json(); message=String(body?.message??body?.detail??message); }catch{}
       throw new Error(message);
     }
-    const reader=response.body.getReader();
+    const reader=(options.gzip?response.body.pipeThrough(new CompressionStream('gzip')):response.body).getReader();    // gzip in the browser, as the rows arrive
     while(true){
       const {done,value}=await reader.read(); if(done) break;
       bytes+=value.byteLength; $('streammsg').textContent=streamSize(bytes);
       chunks.push(value);
     }
-    saveFile(chunks,'text/csv',filename); chunks=[];
+    saveFile(chunks,options.gzip?'application/gzip':(response.headers.get('Content-Type')||'text/csv').split(';')[0],filename); chunks=[];
     $('streambar').value=1; $('streammsg').textContent=`${streamSize(bytes)} downloaded`;
     toast(`Saved ${filename} (${streamSize(bytes)})`);
   }catch(err){
@@ -2806,7 +2875,8 @@ async function streamQuery(confirmed=false){
     setTimeout(()=>$('streamprogress').hidden=true,3500);
   }
 }
-$('stream').onclick=()=>streamQuery(false);
+$('stream').onclick=openStreamDialog;
+$('qdownload').onclick=openResultDialog;
 function beginQuery(){
   const id=globalThis.crypto?.randomUUID?.()||`${Date.now()}-${Math.random()}`;
   S.activeQueryId=id; S.cancelRequested=false;
@@ -2831,15 +2901,17 @@ $('cancelquery').onclick=async()=>{
 let querySeq=0;
 function showQueryResult(seq,m,message){
   if(seq!==querySeq||!$('v-query').classList.contains('on')) return;
-  S.local=m.rows; S.cols=m.cols; S.total=m.rows.length; S.pk=null; S.meta=null;    // a result has no table: no types, defaults or keys from the last table
+  S.local=m.rows; S.cols=m.cols; S.total=m.rows.length; S.pk=null; S.meta=null; S.localTruncated=!!m.truncated;    // a result has no table: no types, defaults or keys from the last table; truncated: more rows than shown
   S.rows=[]; lastFirst=-1;
   $('tools').style.display='none';       // column filters belong to a table, not a result set
-  mountGrid($('qres'));
+  $('qcard').hidden=false; mountGrid($('qcard'));
   buildGrid(); vp.scrollTop=0; render(true);
   for(const t of document.querySelectorAll('.tab')) t.hidden = t.dataset.v!=='query';
   $('morewrap').hidden=true; $('moremenu').hidden=true;
-  show('query');
-  $('qmsg').textContent=message;
+  show('query'); rowPanelAuto();    // after the view shows, as for a table
+  $('qmsg').textContent=''; $('qmsg').title='';    // the bar keeps only what is happening (running…, canceled); the result's rows and time head its card
+  $('qcard-sub').textContent=message;
+  $('qcard-sub').title=m.truncated?'The runner shows at most 10,000 rows or 16 MB of data; Download (before Execute) saves every row':message;
   setExports(true); drawResetSql();
 }
 async function runQuery(confirmed){
@@ -2851,7 +2923,8 @@ async function runQuery(confirmed){
     const m = await api({action:'query', sql, is_confirmed: confirmed?1:0,
                          is_read_only:S.readOnly?1:0,query_id:queryId});
     const count=m.rows.length.toLocaleString();
-    showQueryResult(seq,m,`${m.truncated ? count+'+ rows · showing first '+count : count+' rows'} · ${(performance.now()-t0).toFixed(1)} ms`);
+    showQueryResult(seq,m,`${m.truncated ? `${count}+ rows · showing first ${count}${m.limit==='size'?' (16 MB limit)':''}` : count+(m.rows.length===1?' row':' rows')} · ${(performance.now()-t0).toFixed(1)} ms`);
+    sqlHistoryAdd(sql,{ok:true,rows:m.rows.length,truncated:!!m.truncated,ms:performance.now()-t0});
   }catch(err){
     if(S.cancelRequested){ $('qmsg').className=''; $('qmsg').textContent='Canceled'; hideQueryError(); }
     else if(err.message.includes('unbounded_write')){
@@ -2872,7 +2945,7 @@ $('run').onclick = ()=>runQuery(false);
 $('resetsql').onclick = ()=>{
   $('sql').value=DEFAULT_SQL; S.queryCleared=false;
   removeStored('sql');
-  S.local=null; S.cols=[]; S.total=0; S.rows=[]; lastFirst=-1; pool=[];
+  S.local=null; S.cols=[]; S.total=0; S.rows=[]; lastFirst=-1; pool=[]; rowPanelClose(); $('qcard').hidden=true;
   headEl.textContent=''; rowsEl.textContent=''; inner.style.width=''; canvas.style.height='0'; canvas.classList.remove('has-rows'); vp.scrollTop=0; vp.scrollLeft=0;
   $('empty').classList.remove('on'); $('qmsg').textContent=''; $('qmsg').className=''; hideQueryError();
   setExports(false); drawResetSql(); updateSqlHighlight(); $('sql').focus();
@@ -3012,7 +3085,6 @@ function show(v){
   for(const item of $('moremenu').querySelectorAll('button')) item.classList.toggle('on',item.dataset.v===v);
   $('moremenu').hidden=true;
   $('status').hidden = true;
-  $('queryrunner')?.classList.toggle('on', v==='query');
   $('dbinfo')?.classList.toggle('on', v==='info');
   $('health')?.classList.toggle('on', v==='health');
   if(v==='query'){
