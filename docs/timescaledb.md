@@ -16,29 +16,33 @@ A guideline, not a fixed recipe: adapt it to the feature.
 4. **Schema.** In `config_extend.py`, `config_postgres_schema_telematics` with the same name: tables in `table` (Atom creates them, adds new columns, indexes and checks), hypertables, compression, policies and rollups in `sql` (run after the tables, at every startup), built from the [samples](#samples). Nothing of Atom's goes there: `users`, logs and the rest stay on master.
    ```python
    config_postgres_schema_telematics = {
-   "extension": ["timescaledb", "postgis"],
    "table": {
-   "gps_point": {"admin": ["create", "read"], "buffer_limit": 1000, "column": [
-   {"name": "device_id", "datatype": "bigint", "is_primary": True},
-   {"name": "time", "datatype": "timestamptz", "is_primary": True},
-   {"name": "lat", "datatype": "float8", "is_mandatory": True},
-   {"name": "lng", "datatype": "float8", "is_mandatory": True},
+   "gps_point": {"column": [
+   {"name": "device_id", "datatype": "bigint", "is_primary_key": True},
+   {"name": "time", "datatype": "timestamptz", "is_primary_key": True},
+   {"name": "lat", "datatype": "float8", "is_not_null": True},
+   {"name": "lng", "datatype": "float8", "is_not_null": True},
    {"name": "speed", "datatype": "real"},
    ]},
-   "gps_point_latest": {"admin": ["read"], "column": [
-   {"name": "device_id", "datatype": "bigint", "is_primary": True},
-   {"name": "time", "datatype": "timestamptz", "is_mandatory": True},
-   {"name": "location", "datatype": "geography(Point,4326)", "is_mandatory": True, "index": "gist(location)"},
+   "gps_point_latest": {"column": [
+   {"name": "device_id", "datatype": "bigint", "is_primary_key": True},
+   {"name": "time", "datatype": "timestamptz", "is_not_null": True},
+   {"name": "location", "datatype": "geography(Point,4326)", "is_not_null": True, "index": ["gist(location)"]},
    {"name": "speed", "datatype": "real"},
    ]},
    },
+   "control": {"extension": ["timescaledb", "postgis"], "buffer_limit": {"gps_point": 1000}},
    "sql": {"gps": [
    "SELECT create_hypertable('gps_point', by_range('time', INTERVAL '7 days'), if_not_exists => true)",
    "SELECT add_retention_policy('gps_point', INTERVAL '1 year', if_not_exists => true)",
    ]},
    }
    ```
-   `gps_point` has no `id`: a point is device + time, and the key must include `time`. `lat`/`lng` as plain numbers compress far better than a geography column. Access is closed unless listed, so here only admin routes (granted ids) reach the tables; the feature's own routes need nothing in the schema. A table's `retention_day` would also delete old rows (in batches, by `script/postgres_cleanup.py`), but on a hypertable `add_retention_policy` or `drop_chunks` in `sql` drops whole chunks and is much faster.
+   `gps_point` has no `id`: a point is device + time, and the key must include `time`. `lat`/`lng` as plain numbers compress far better than a geography column.
+
+   **Access.** Nothing is listed in `control`, so `/public`, `/private` and `/my` refuse both tables (403), and only users whose `master.users.permissions` hold an admin read route's id reach them (`GET /admin/object-read?connection=telematics&table=gps_point&order=time desc`; root holds every id). To let any logged-in user read the live table, add `"private_read": ["gps_point_latest"]` to this `control`. The feature's own routes need nothing there. `/admin/object-create` can write points by hand; `/my` and `/public` creates need a `created_by_id` column, so device points are written by the feature's code with `func_postgres_create` ([below](#points-from-a-device-webhook)).
+
+   **Retention.** `control.retention_day` deletes by a `created_at` column (startup refuses a table without one, such as `gps_point`); on a hypertable `add_retention_policy` (or a scheduled `drop_chunks`) in `sql` drops whole chunks, much faster.
 5. **Start Atom.** It applies the schema to that database (master first), then reads it into the schema cache. Before a deploy, `venv/bin/python -m script.postgres_schema_plan --db telematics` shows what the next start would change.
 6. **APIs.** The feature's own `function_extend/gps.py` (`func_gps_*` with the SQL), `router_extend/gps.py` (reads params, calls one function) and a `config_api` entry per route in `config_extend.py`, as for any feature ([extend.md](extend.md)).
 7. **UI.** A page in `static_extend/gps/` that calls those APIs (map, charts, reports), built to [frontend.md](frontend.md); business rules in `docs_extend/gps.md`, tests in `tests_extend/test_gps.py`.
@@ -68,7 +72,7 @@ async def func_api_gps_route(*, request: Request):
 | Tables in `table`, TimescaleDB objects in `sql` | Atom manages columns, indexes and checks; hypertables, compression, policies and rollups are TimescaleDB calls |
 | A key that includes the time column, no `id` | A hypertable's primary and unique keys must include its time column; `id` is optional in Atom |
 | Every `sql` statement safe to run again ([forms below](#safe-to-run-again)) | `sql` runs at every startup; what is already there is skipped |
-| The feature's own routes for reports and maps | Atom's generic routes read and create on a table without `id` (read with an `order`) but can't update, delete or relation-fetch it |
+| The feature's own routes for reports, maps and writes | Atom's generic routes read a table without `id` (with an `order`), but can't update, delete or relation-fetch it, and only admin creates in a table without `created_by_id` |
 | Compression and retention from the first day | Raw points grow fast; old chunks shrink about 90% and expire without a slow `DELETE` (Apache edition: retention by a scheduled `drop_chunks`, disk sized for uncompressed data) |
 | Every read filters on the time column | Only the chunks in range are read |
 | Rollups for reports, a `<table>_latest` table for live views | Long ranges and live maps without scanning raw points |
@@ -201,7 +205,7 @@ async def func_gps_point_push(*, app_state, point: dict) -> str:
     row = {"time": datetime.fromtimestamp(point["time_ms"] / 1000, UTC), "device_id": point["device_id"], "lat": point["lat"], "lng": point["lng"], "speed": point.get("speed")}
     return await app_state.func_postgres_create(client_postgres=app_state.client_postgres_dict["telematics"], client_postgres_conn=None, client_password_hasher=None,
         cache_postgres_schema=app_state.cache_postgres_schema_dict["telematics"], buffer_postgres=app_state.buffer_postgres_create,
-        buffer_rows_max=app_state.config_buffer_rows_max, buffer_full_mode="reject", config_column_regex=app_state.config_column_regex,
+        buffer_rows_max=app_state.config_buffer_rows_max, buffer_full_mode="reject", column_regex=app_state.func_column_regex(app_state=app_state, table="gps_point", connection="telematics"),
         buffer_limit=app_state.func_buffer_limit(app_state=app_state, table="gps_point", connection="telematics"), mode="buffer", table="gps_point", obj_list=[row],
         connection="telematics", on_conflict="nothing")
 ```
@@ -212,7 +216,7 @@ async def func_gps_point_push(*, app_state, point: dict) -> str:
 | `on_conflict="nothing"` | The key `(device_id, time)` skips a point sent twice; a batch never fails on a duplicate |
 | No `id` column | Fine: the insert asks for `RETURNING id` only when the table has one |
 | `config_postgres_buffer_flush_auto_sec_telematics` | A short interval keeps the points that only live in memory few; a crash loses at most that many seconds |
-| `buffer_limit` (on `gps_point` in the schema) | A busy table is written as soon as that many points wait, before the timer |
+| `buffer_limit` (`{"gps_point": 1000}` in the schema's `control`) | A busy table is written as soon as that many points wait, before the timer |
 | Reply in the sender's format | Many senders treat any other body or a slow reply as a failure and drop the point |
 | A backfill job | The sender doesn't retry: a scheduled script reads the sender's history API for the last hours and writes it with the same `on_conflict="nothing"`, so only the gaps are added |
 
@@ -233,14 +237,15 @@ Code written this way also runs on the Community edition; moving there later add
 
 ## What Atom does with these tables
 
-Atom manages the tables in the database's schema: it creates them, adds columns, indexes and checks, and removes the indexes and checks it made that the schema no longer lists. A table not in the schema is never dropped or altered. Triggers go only on the tables that schema lists and follow its `control` and each table's `row_lock`/`row_delete_max` (none set: none added, except the `updated_at` and `is_protected` triggers on a table with those columns):
+Atom manages the tables in the database's schema: it creates them, adds columns, indexes and checks, and removes the indexes and checks it made that the schema no longer lists. A table not in the schema is never dropped or altered. Triggers go only on the tables that schema lists and follow its `control` (`row_update_disabled`, `row_delete_disabled`, `row_delete_max`: none listed, none added; the switches `is_updated_at_set` and `is_protected_delete_disabled` act only on a table with those columns):
 
 | Key | Effect on a hypertable |
 |---|---|
-| `control` `"is_truncate_table": False` | `TRUNCATE` is refused; retention and `drop_chunks` still work |
-| `row_delete_max` on the table | its trigger uses a transition table, which hypertables refuse: leave it off a hypertable |
+| `control` `"is_truncate_disabled": True` (default) | `TRUNCATE` is refused; retention and `drop_chunks` still work |
+| the table in `control.row_delete_max` | its trigger uses a transition table, which hypertables refuse: leave it off a hypertable |
 
 Also:
 - With `config_is_postgres_schema_init` off, startup changes nothing and stops when the database differs from its schema, until `script.postgres_schema_plan --apply` runs the changes.
-- The schema cache lists the tables after the start; admin routes read (`order=time desc`) and create with `?connection=telematics` as the table's `admin` allows; update, delete and relation fetch answer 400 `table 'gps_point' has no id`; `/my/object-create` refuses it (no `created_by_id`); public and private reads only reach a table whose `public` / `private` lists `read`.
+- The schema cache lists the tables after the start (`GET /admin/postgres-schema?connection=telematics`). Admin reads, exports, group-by and distinct work with `?connection=telematics` (reads with `order=time desc`); `/admin/object-create?connection=telematics&table=gps_point` writes points (it sets `created_by_id` only when the table has it), while `/my` and `/public` creates answer 400 `table 'gps_point' lacks required 'created_by_id' column`; update, delete and relation fetch answer 400 `table 'gps_point' has no id`; public and private reads only reach a table in `control.public_read` / `private_read`.
+- Login, users and permissions stay on master: the same token reaches `telematics`, and the user checks read master.
 - `script.postgres_backup` copies the master database only: back the time-series database up with database tools.

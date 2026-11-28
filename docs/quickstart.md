@@ -6,7 +6,7 @@ Get up and running with Atom in less than 5 minutes.
 
 ## Prerequisites
 
-1. Server running on `http://localhost:8000` (see [Installation](../readme.md#installation-new-project)).
+1. Server running on `http://localhost:8000` (see [Installation](../README.md#installation-new-project)).
 2. PostgreSQL database connected via `config_postgres_url_master` in `.env`.
 3. Required security keys set in `.env`:
    ```dotenv
@@ -53,7 +53,7 @@ export TOKEN="eyJhbGciOi..."
 
 ## 2. Create a Record
 
-Insert a new record into any table (e.g. `test`) using `/my/object-create`:
+Insert a new record into a table open to `/my` creates (listed in its schema's `control.my_create`; Atom's `test` is) using `/my/object-create`:
 
 ```bash
 curl -X POST "http://localhost:8000/my/object-create?table=test" \
@@ -70,7 +70,7 @@ curl -X POST "http://localhost:8000/my/object-create?table=test" \
 }
 ```
 
-The returned integer is the newly created row ID. Ownership (`created_by_id`) is automatically assigned from your token.
+The returned integer is the newly created row ID. Ownership (`created_by_id`) is automatically assigned from your token; a request that sends `created_by_id` or another audit column gets 400.
 
 ---
 
@@ -143,7 +143,7 @@ curl -X PUT "http://localhost:8000/my/object-update?table=task&ownership_column=
 
 ## 6. Delete a Record
 
-Permanently delete records created by you using `/my/object-delete`:
+Permanently delete records created by you using `/my/object-delete` (`?mode=soft` sets `deleted_at` instead, on a table that has it):
 
 ```bash
 curl -X POST "http://localhost:8000/my/object-delete" \
@@ -154,7 +154,7 @@ curl -X POST "http://localhost:8000/my/object-delete" \
 
 ---
 
-For records received by or assigned to you, pass an operation-approved `ownership_column`. Read uses `config_column_ownership_read`, update uses `config_column_ownership_update`, and delete uses `config_column_ownership_delete`. Keep `table` and `ids` in the JSON body for ID-based deletion. Omit `ownership_column` to use `created_by_id`. The user ID always comes from the authenticated token. See [ownership and account deletion rules](crud.md).
+For records received by or assigned to you, pass an operation-approved `ownership_column`. The column's `ownership` key in the schema lists the actions it allows (`read`, `update`, `delete`). Keep `table` and `ids` in the JSON body for ID-based deletion. Omit `ownership_column` to use `created_by_id`. The user ID always comes from the authenticated token. See [ownership and account deletion rules](crud.md).
 
 ## Next Steps
 

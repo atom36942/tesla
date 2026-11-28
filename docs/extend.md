@@ -65,7 +65,7 @@ config_values = {key: value for module in config_modules for key, value in vars(
 
 Before writing a helper, client or pool, check what Atom already has. Databases come from `.env`, any number per type: each line `config_<db>_url_<name>=<url>` (`config_postgres_url_master`, `config_postgres_url_reports`, `config_mssql_url_master`, ...) fills `config_<db>_url_dict` in `config.py`, and Atom opens one pool per entry at startup in `app.state.client_postgres_dict["<name>"]`, `client_mssql_dict["<name>"]`, `client_redis_dict["<name>"]` or `client_clickhouse_dict["<name>"]` (`master` is the default), and closes it at shutdown. Adding a database is one `.env` line, no code. Atom also creates `client_s3`, `client_ses`, `client_openai`, `client_gemini`, `client_http` and the rest. Routes and functions use them; they never open a second pool or SDK client. Atom's `func_*` helpers cover request params, errors, table CRUD, SQL runners, CSV export and import, file storage, email and SMS, queues and background tasks; [backend.md](backend.md) lists them under "Reuse Atom". When something is missing, write a project `func_<feature>_*` or propose it for Atom.
 
-Data users can change from a page (an option list, a setting) belongs in the database, never in a tracked file, which a deploy or `git pull` would silently replace: a setting is one row in Atom's `config` table (`key`, jsonb `value`), other data gets its own table in `config_postgres_schema_master`. Option lists: lists developers change go in `config_options`; lists users change from a page go in a table the project designs, written only through the feature's own routes (the table lists no `my` or `admin` writes).
+Data users can change from a page (an option list, a setting) belongs in the database, never in a tracked file, which a deploy or `git pull` would silently replace: a setting is one row in Atom's `config` table (`key`, jsonb `value`), other data gets its own table in `config_postgres_schema_master`. Option lists: lists developers change go in `config_options`; lists users change from a page go in a table the project designs, written only through the feature's own routes (the table is in no `my_create`, `my_update` or `my_delete` list of `control`).
 
 ### Claude
 
@@ -107,12 +107,12 @@ An error in `func_extend` stops startup. An error in `func_extend_shutdown` is p
 
 ## Extend Atom's dictionaries
 
-`config.py` has five dictionary settings a project extends: `config_column_regex`, `config_options`, `config_users_role_label`, `config_postgres_schema_master` and `config_api`. Define each one you change once in `config_extend.py`; `main.py` uses that value in place of Atom's and does not merge for you, so start from Atom's value and add or override keys:
+`config.py` has four dictionary settings a project extends: `config_options`, `config_users_role_label`, `config_postgres_schema_master` and `config_api`. Define each one you change once in `config_extend.py`; `main.py` uses that value in place of Atom's and does not merge for you, so start from Atom's value and add or override keys:
 
 - spread Atom's base at the top level only: `{**base_config_x, "key": value}`. To change one of Atom's keys, write that key's whole value (copy from `config.py` what you keep); never spread a nested base like `**base_config_x["users"]`, so every override shows its full value in one place;
-- `config_postgres_schema_master` is the one exception, because its tables sit one level down: `{**base_config_postgres_schema_master, "table": {**base_config_postgres_schema_master["table"], "task": {"my": [...], "column": [...]}}}`; an Atom table changed keeps its other keys: `"test": {**base_config_postgres_schema_master["table"]["test"], "public": []}`.
+- `config_postgres_schema_master` is the one exception, because its tables and control lists sit one level down: `{**base_config_postgres_schema_master, "table": {**base_config_postgres_schema_master["table"], "task": {"column": [...]}}, "control": {**base_config_postgres_schema_master["control"], "my_read": [*base_config_postgres_schema_master["control"]["my_read"], "task"]}}`; an Atom list changed is written whole: `"public_read": []`.
 
-Keep Atom's keys when you extend: a dict defined from scratch replaces Atom's completely. For three of them startup checks it: if `config_api`, `config_postgres_schema_master` or `config_users_role_label` in `config_extend.py` is missing any of Atom's routes, Postgres setup (extensions, tables, switches, SQL) or role codes, it stops and names them. Changing their values (a route's policy, a table's columns) is fine; how you write the dict (`**base`, a copy) doesn't matter.
+Keep Atom's keys when you extend: a dict defined from scratch replaces Atom's completely. For three of them startup checks it: if `config_api`, `config_postgres_schema_master` or `config_users_role_label` in `config_extend.py` is missing any of Atom's routes, Postgres setup (tables, `control` keys and extensions, SQL entries) or role codes, it stops and names them. Changing their values (a route's policy, a table's columns) is fine; how you write the dict (`**base`, a copy) doesn't matter.
 
 Lay the file out in three sections: `# base` (imports of Atom's values, `from config import config_api as base_config_api`), `# atom` (every setting Atom's `config.py` defines: its dicts, each starting from its base, and plain overrides such as `config_root_html_path`) and `# extend` (settings only your project has, such as `config_schedule_script_<script>`). A name in Atom's `config.py` goes in `# atom`, any other in `# extend`. When `config_extend.py` is missing, sync creates it in this layout, with `config_users_role_label`, `config_postgres_schema_master` and `config_api` already defined from their bases and commented examples; add other Atom dicts to `# base` and `# atom` the same way.
 
@@ -132,24 +132,28 @@ config_api = {
     "/my/object-read": {"id": 26, "auth": ["jwt"], "is_connection_param": True, "is_active": False},
 }
 
-# 3. Add a table (its access and labels on it), and a column to Atom's users table (Atom's columns plus yours).
+# 3. Add a table (labels on its columns, its access in control), and a column to Atom's users table (Atom's columns plus yours).
 config_postgres_schema_master = {
     **base_config_postgres_schema_master,
     "table": {
         **base_config_postgres_schema_master["table"],
-        "task": {"private": ["read"], "my": ["create", "read", "update", "delete"], "column": [
-            {"name": "id", "datatype": "bigint", "identity": "always", "is_primary": True},
-            {"name": "created_by_id", "datatype": "bigint", "index": "btree(created_by_id,id)"},
+        "task": {"column": [
+            {"name": "id", "datatype": "bigint", "identity": "always", "is_primary_key": True},
+            {"name": "created_by_id", "datatype": "bigint", "index": ["btree(created_by_id,id)"]},
             {"name": "title", "datatype": "text"},
-            {"name": "status", "datatype": "smallint", "default": 1, "in": (1, 2, 3), "int_mapping": {1: "To Do", 2: "In Progress", 3: "Done"}},
+            {"name": "status", "datatype": "smallint", "default": 1, "allowed_values": [1, 2, 3], "int_mapping": {1: "To Do", 2: "In Progress", 3: "Done"}},
             {"name": "priority", "datatype": "smallint", "int_mapping": {1: "Low", 2: "Medium", 3: "High"}},
         ]},
-        "users": {**base_config_postgres_schema_master["table"]["users"], "column": [*base_config_postgres_schema_master["table"]["users"]["column"], {"name": "department", "datatype": "text"}]},
+        "users": {"column": [*base_config_postgres_schema_master["table"]["users"]["column"], {"name": "department", "datatype": "text"}]},
+    },
+    "control": {
+        **base_config_postgres_schema_master["control"],
+        **{key: [*base_config_postgres_schema_master["control"][key], "task"] for key in ("private_read", "my_create", "my_read", "my_update", "my_delete")},
     },
 }
 ```
 
-These examples are alternatives to existing definitions: merge the snippets into your current dictionaries rather than assigning the same configuration name again later. Choose an unused API ID. The custom route policy needs a matching router, as shown below. `int_mapping` provides labels; it does not change role permissions or validate database values (`in` does).
+These examples are alternatives to existing definitions: merge the snippets into your current dictionaries rather than assigning the same configuration name again later. Choose an unused API ID. The custom route policy needs a matching router, as shown below. `int_mapping` provides labels; it does not change role permissions or validate database values (`allowed_values` does).
 
 ### What startup checks in `config_extend.py`
 
@@ -158,12 +162,12 @@ Three variables are checked, and only when `config_extend.py` defines them:
 | Variable | Checked | Startup stops when |
 |---|---|---|
 | `config_api` | every route Atom defines is still a key | an Atom route is missing (e.g. `/health`) |
-| `config_postgres_schema_master` | Atom's parts (`extension`, `table`, `control`, `sql`) and, inside each, every extension, table, switch and SQL entry Atom defines | any of them is missing (e.g. `table.users`, `extension.pg_trgm`, `control.is_index_drop`); a table moved to another database's `config_postgres_schema_<name>` (`log_api` for a log database) counts as kept |
+| `config_postgres_schema_master` | Atom's parts (`table`, `control`, `sql`) and, inside each, every table, `control` key (switches, access lists, numbers), name in `control.extension` and SQL entry Atom defines | any of them is missing (e.g. `table.users`, `control.my_read`, `control.extension.pg_trgm`); a table moved to another database's `config_postgres_schema_<name>` (`log_api` for a log database) counts as kept. What a list holds is not checked: `"public_read": []` passes |
 | `config_users_role_label` | Atom's role codes are still there | code `1` is missing |
 
-Values are not checked: change a route's policy, a table's columns or access, or a label, and add your own routes, tables, roles and labels, freely. What counts as Atom's is read from `config.py` on every start, so entries Atom adds later are covered without changing the check. How the dict is written does not matter either: `{**base_config_api, ...}` or a copy both pass. The message names the missing entries and the fix, for example `config_postgres_schema_master drops 3 of Atom's entries (table.users, extension.pg_trgm, control.is_index_drop); fix: {**base_config_postgres_schema_master, "table": {**base_config_postgres_schema_master["table"], ...}}`.
+Values are not checked: change a route's policy, a table's columns or access, or a label, and add your own routes, tables, roles and labels, freely. What counts as Atom's is read from `config.py` on every start, so entries Atom adds later are covered without changing the check. How the dict is written does not matter either: `{**base_config_api, ...}` or a copy both pass. The message names the missing entries and the fix, for example `config_extend.py: config_postgres_schema_master drops 3 of Atom's entries (table.users, control.my_read, control.extension.pg_trgm); fix: {**base_config_postgres_schema_master, "table": {**base_config_postgres_schema_master["table"], ...}}`.
 
-Not checked: `config_options`, `config_column_regex` and any `config_*` the project adds; a missing key there only removes that option.
+Not checked: `config_options` and any `config_*` the project adds; a missing key there only removes that option.
 
 One more check covers the whole file: a base imported under a name starting with `config_` (`config_api_base = ...` instead of `base_config_api`) stops startup, because every `config_*` name is read as a setting.
 
@@ -179,13 +183,13 @@ Dictionary unpacking (`**base`) copies Atom's entries into the new dictionary; a
 
 ```python
 # Add columns: Atom's users columns plus yours, so later Atom columns are still inherited.
-"users": {**base_config_postgres_schema_master["table"]["users"], "column": [*base_config_postgres_schema_master["table"]["users"]["column"], {"name": "department", "datatype": "text"}]},
+"users": {"column": [*base_config_postgres_schema_master["table"]["users"]["column"], {"name": "department", "datatype": "text"}]},
 
 # Change a column: copy the list with that column replaced.
-"users": {**base_config_postgres_schema_master["table"]["users"], "column": [{**column, "datatype": "varchar(200)"} if column["name"] == "job_title" else column for column in base_config_postgres_schema_master["table"]["users"]["column"]]},
+"users": {"column": [{**column, "datatype": "varchar(200)"} if column["name"] == "job_title" else column for column in base_config_postgres_schema_master["table"]["users"]["column"]]},
 
-# Change access: keep the rest of Atom's table.
-"test": {**base_config_postgres_schema_master["table"]["test"], "public": []},
+# Change access: in control, keep the rest of Atom's lists.
+"control": {**base_config_postgres_schema_master["control"], "public_create": [], "public_read": []},
 ```
 
 Writing the complete column list by hand also works, but then you maintain every column Atom's authentication and other features need. Do not add a column name that already exists; change its definition instead. These settings only describe the schema; PostgreSQL changes happen during schema initialization when enabled. Review schema changes before applying them to existing data.
@@ -282,7 +286,7 @@ See the [sync guide](sync.md) for update behavior and recovery.
 
 ## 4. Add or change database tables
 
-Tables are declared as data in `config.py` under `config_postgres_schema_master["table"]` and created automatically on startup when `config_is_postgres_schema_init = True`. Each table is an object: its `column` list and who may use it through Atom's object routes (closed unless listed, [config.md](config.md#table-keys)). To add your own table without editing `config.py`, extend the structure in `config_extend.py`:
+Tables are declared as data in `config.py` under `config_postgres_schema_master["table"]` and created automatically on startup when `config_is_postgres_schema_init = True`. Each table is `{"column": [...]}`; who may use it through Atom's object routes is in the schema's `control` (closed unless listed, [config.md](config.md#control)). To add your own table without editing `config.py`, extend the structure in `config_extend.py`:
 
 ```python
 # config_extend.py
@@ -292,22 +296,26 @@ config_postgres_schema_master = {
 **base_config_postgres_schema_master,
 "table": {
 **base_config_postgres_schema_master["table"],
-"product": {"private": ["read"], "my": ["create", "read", "update", "delete"], "column": [
-    {"name": "id", "datatype": "bigint", "identity": "always", "is_primary": True},
-    {"name": "created_at", "datatype": "timestamptz", "default": "now()", "index": "btree(created_at)"},
-    {"name": "created_by_id", "datatype": "bigint", "index": "btree(created_by_id,id)"},
-    {"name": "title", "datatype": "text", "is_mandatory": True, "index": "gin_trgm(title)"},
+"product": {"column": [
+    {"name": "id", "datatype": "bigint", "identity": "always", "is_primary_key": True},
+    {"name": "created_at", "datatype": "timestamptz", "default": "now()", "index": ["btree(created_at)"]},
+    {"name": "created_by_id", "datatype": "bigint", "index": ["btree(created_by_id,id)"]},
+    {"name": "title", "datatype": "text", "is_not_null": True, "index": ["gin_trgm(title)"]},
     {"name": "price", "datatype": "numeric(10,2)"},
 ]},
+},
+"control": {
+**base_config_postgres_schema_master["control"],
+**{key: [*base_config_postgres_schema_master["control"][key], "product"] for key in ("private_read", "my_create", "my_read", "my_update", "my_delete")},
 },
 }
 ```
 
-**Another database** gets its own schema with the same name as its URL (`config_postgres_url_telematics` in `.env`): `config_postgres_schema_telematics = {"extension": [...], "table": {...}, "sql": {...}}` in `config_extend.py`, applied to that database at startup, after master. It holds only the project's tables (nothing of Atom's). `id` is optional on every table: give one when Atom's routes should update, delete or relation-fetch it; a table keyed by other columns (`is_primary` on each, e.g. `device` and `time`) is read with an `order` and created as usual. See [database.md](database.md#2-declarative-schema-management) and, for time-series, [timescaledb.md](timescaledb.md).
+**Another database** gets its own schema with the same name as its URL (`config_postgres_url_telematics` in `.env`): `config_postgres_schema_telematics = {"table": {...}, "control": {"extension": [...]}, "sql": {...}}` in `config_extend.py`, applied to that database at startup, after master. It holds only the project's tables (nothing of Atom's) and is written whole, its own `control` included: login and permissions stay on master, and its tables are open to `/public`, `/private` and `/my` only as that `control` lists them ([adding a database](database.md#adding-a-database-end-to-end)). `id` is optional on every table: give one when Atom's routes should update, delete or relation-fetch it; a table keyed by other columns (`is_primary_key` on each, e.g. `device` and `time`) is read with an `order` and created as usual. See [database.md](database.md#2-declarative-schema-management) and, for time-series, [timescaledb.md](timescaledb.md).
 
 `config.py` holds Atom core tables; keep application tables in `config_extend.py`. Spreading the base keeps Atom's tables and leaves `config.py`'s own dictionaries unchanged (see [Replace or modify a core table's columns](#replace-or-modify-a-core-tables-columns) for Atom's tables).
 
-Column specs support `is_primary`, `is_mandatory`, `default`, `unique`, `check`, `regex`, `index` (btree / gin / gist / gin_trgm / hnsw), array types, PostGIS geography, `old` (for renames), `int_mapping` (labels) and `is_private_read_blocked`. A table with a `created_by_id` column and `my` actions works with the generic `/my/object-*` ownership flow out of the box. Give the owner column an index on (owner, `id`), e.g. `"index": "btree(created_by_id,id)"` (and `btree(received_by_id,id)` etc. for other owner columns you read by): `/my/object-read` filters by owner and sorts by `id`, and without it Postgres scans the table, which gets slower as it grows (see [performance.md](performance.md#9-owner-index-and-json-encoding)).
+Column specs support `identity`, `is_primary_key`, `is_not_null`, `default`, `generated`, `unique`, `check`, `allowed_values`, `regex` and `regex_message`, `index` (btree / gin / gist / gin_trgm / hnsw), array types, PostGIS geography, `old_name` (for renames), `int_mapping` (labels), `read_blocked`, `write_blocked` and `ownership` ([column keys](config.md#column-keys)); any other key stops startup. A table with a `created_by_id` column in the `my_*` lists works with the generic `/my/object-*` ownership flow out of the box. Give the owner column an index on (owner, `id`), e.g. `"index": ["btree(created_by_id,id)"]` (and `btree(received_by_id,id)` etc. for other owner columns you read by): `/my/object-read` filters by owner and sorts by `id`, and without it Postgres scans the table, which gets slower as it grows (see [performance.md](performance.md#9-owner-index-and-json-encoding)).
 
 ## 5. Add background workers
 
@@ -384,4 +392,4 @@ In `# logic`, write one small helper per step, named `noun_verb`, with keyword-o
 
 ---
 
-📚 [Back to README](../readme.md)
+📚 [Back to README](../README.md)

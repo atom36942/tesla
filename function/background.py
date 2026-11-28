@@ -38,7 +38,7 @@ async def func_postgres_buffer_flush_all(*, app_state: State, connections: set =
                 client_postgres = app_state.client_postgres_dict.get(name)
                 if not client_postgres: raise Exception(f"buffered rows for '{name}' wait: no pool (config_postgres_url_{name} is not set)")
                 async with app_state.runtime_lock_postgres_buffer_flush:
-                    await app_state.func_postgres_create(client_postgres=client_postgres, client_postgres_conn=None, client_password_hasher=None, cache_postgres_schema=app_state.cache_postgres_schema_dict.get(name, {}), buffer_postgres=buffer, config_column_regex=None, buffer_limit=None, mode="flush", table=None, obj_list=None, connection=name)
+                    await app_state.func_postgres_create(client_postgres=client_postgres, client_postgres_conn=None, client_password_hasher=None, cache_postgres_schema=app_state.cache_postgres_schema_dict.get(name, {}), buffer_postgres=buffer, column_regex=None, buffer_limit=None, mode="flush", table=None, obj_list=None, connection=name)
             except Exception as e: func_runtime_error_record(runtime_error_count=app_state.runtime_error_count, key="buffer_flush", error=e)
 
 async def func_postgres_buffer_flush_periodic_task(*, app_state: State) -> None:
@@ -74,7 +74,7 @@ async def func_inmemory_cache_cleanup_periodic_task(*, cache_api_response: dict,
     return
 
 async def func_table_retention_cleanup(*, conn: asyncpg.Connection, table: str, cutoff, timeout_sec: float) -> int:
-    """Delete at most 5,000 rows of table created before cutoff (the table's retention_day in its schema; script/postgres_cleanup.py calls it until done). script_run keeps a run still going. Rows are found by (tableoid, ctid), so tables without id and partitioned ones work too."""
+    """Delete at most 5,000 rows of table created before cutoff (the table's days in control.retention_day of its schema; script/postgres_cleanup.py calls it until done). script_run keeps a run still going. Rows are found by (tableoid, ctid), so tables without id and partitioned ones work too."""
     keep = " AND status <> 1" if table == "script_run" else ""
     result = await conn.execute(f'DELETE FROM "{table}" WHERE (tableoid, ctid) IN (SELECT tableoid, ctid FROM "{table}" WHERE created_at < $1{keep} ORDER BY created_at LIMIT 5000 FOR UPDATE SKIP LOCKED)', cutoff, timeout=timeout_sec)    # noqa: S608 - table names come from config_postgres_schema, not requests
     return int(result.split()[-1])

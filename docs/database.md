@@ -9,7 +9,7 @@ Atom provides a comprehensive database layer powered by **asyncpg**, featuring c
 Atom manages asynchronous PostgreSQL connection pools initialized during startup in `main.py`.
 
 ### Databases by name (`client_postgres_dict`)
-Every database is one `.env` line, `config_postgres_url_<name>`. `master` is required and is the default database (writes, users, config, schema init):
+Every database is one `.env` line, `config_postgres_url_<name>`. `master` is required and is the default database (writes, users and auth, config, schema init; [master holds auth](#master-holds-auth-other-databases-hold-data)):
 ```bash
 config_postgres_url_master=postgresql://atom:secret@localhost:5432/atom
 config_postgres_url_replica1=postgresql://reader:secret@replica-host:5432/atom
@@ -22,6 +22,26 @@ config_postgres_pool_max_size_analytics=3    # optional, per database: analytics
 `config_postgres_query_timeout_sec` (default `0`, no limit) cancels any query on the app's pools that runs longer, so a hung query cannot hold a pool connection for good; it applies to startup's schema changes and exports too. If startup fails while opening the pools, the ones already open are closed.
 Each name becomes a pool in `app.state.client_postgres_dict` (for example `client_postgres_dict["master"]`) with its schema in `app.state.cache_postgres_schema_dict`. Code that always uses the main database reads `client_postgres_dict["master"]`. Every URL needs a name: an unsuffixed `config_postgres_url` (also `config_redis_url`, `config_clickhouse_url`, `config_mssql_url`) or an empty `config_postgres_url_` stops startup.
 
+### Master holds auth; other databases hold data
+Atom's login users live in **`master` only**: `users`, tokens, permissions, API keys, OTP, two-factor and the user routes (`/auth/*`, `/my/user-*`, `/admin/user-*`) always read and write `master`. Every other database (`analytics`, `logs`, `telemetry`, a TimescaleDB, a warehouse) is for data: its own tables in its own `config_postgres_schema_<name>`, reached by the object and table routes with `?connection=<name>` and by project code through `client_postgres_dict["<name>"]`. A user always logs in through `master`, and the same token then works on any database the route allows.
+
+A table named `users` in another database is a plain table: no login, no admin user, no login triggers.
+
+Several separate projects don't share one Atom app and switch auth per database: each project is its own Atom app with its own `master`. To keep hosting cheap, the apps can share one App Service plan and one Postgres server (one database each), each on its own subdomain.
+
+### Read replicas (a database without its own schema)
+A read replica of master needs only its `.env` line, `config_postgres_url_replica1=...`, and no `config_postgres_schema_replica1`. A database without its own schema follows **master's** rules: the same `control` access lists, `read_blocked`, `write_blocked`, `ownership`, `buffer_limit` and `regex` (`func_postgres_rule_database` names the database whose rules apply). Startup never changes a database without a schema. So `GET /public/object-read?table=products&connection=replica1` is allowed exactly when master allows it.
+
+| On `?connection=replica1` | What happens |
+| :--- | :--- |
+| Reads (`object-read`, exports, group-by, distinct) | Read from the replica, with master's access and column rules |
+| `/my/profile`, `/private/user-read` | Read `users` from the replica (a database with its own schema gets 400 `users live in master`) |
+| Mark-as-read (`/my/object-read` with `received_by_id`) | Written to master: the write goes to the database whose rules apply, never to a replica |
+| `last_active_at` (`/my/profile`) | Written to master |
+| A write route flagged for `connection` | Sent to the replica, which refuses it (give the replica a read-only login) |
+
+A database **with** its own `config_postgres_schema_<name>` (a warehouse, logs, TimescaleDB) has only its own rules: nothing is open to `/public`, `/private` or `/my` until its own `control` lists it.
+
 ### Picking a database per request (`?connection=<name>`)
 `connection` is the one query parameter that picks which PostgreSQL database a request uses. Its value is a `<name>` from a `config_postgres_url_<name>` line in `.env` (`master`, `replica1`, `analytics`, ...).
 
@@ -32,13 +52,13 @@ Each name becomes a pool in `app.state.client_postgres_dict` (for example `clien
 | `connection=<name>` where `<name>` has no `config_postgres_url_<name>` | 404 |
 | `connection=...` on a route without the flag | 400 `connection not allowed on this route`; the route always uses master |
 
-Routes Atom flags: the reads `/my/profile`, `/my/object-read`, `/my/object-read-export`, `/my/message-inbox`, `/my/message-thread`, `/private/object-read`, `/private/object-read-export`, `/private/user-read`, `/private/table-column-groupby`, `/private/table-column-distinct`, `/public/object-read`, `/public/object-read-export`, `/public/table-column-groupby`, `/public/table-column-distinct`, `/admin/object-read`, `/admin/object-read-export`, `/admin/table-column-groupby`, `/admin/table-column-distinct`, `/admin/postgres-schema`, `/admin/postgres-info`, `/admin/postgres-slow-queries`, `/admin/postgres-slow-queries-reset`, `/admin/postgres-query-runner-read`, `/admin/postgres-query-runner-read-export`, `/admin/postgres-query-ai`, `/admin/postgres-import`, and `/admin/monitor` (its Database tab); the writes `/admin/object-create`, `/admin/object-update` and `/admin/object-delete` (role 1). The list in `config_api` is the source of truth; a project flags its own routes the same way.
+Routes Atom flags: the reads `/my/profile`, `/my/object-read`, `/my/object-read-export`, `/my/message-inbox`, `/my/message-thread`, `/private/object-read`, `/private/object-read-export`, `/private/user-read`, `/private/table-column-groupby`, `/private/table-column-distinct`, `/public/object-read`, `/public/object-read-export`, `/public/table-column-groupby`, `/public/table-column-distinct`, `/admin/object-read`, `/admin/object-read-export`, `/admin/table-column-groupby`, `/admin/table-column-distinct`, `/admin/postgres-schema`, `/admin/postgres-info`, `/admin/postgres-slow-queries`, `/admin/postgres-slow-queries-reset`, `/admin/postgres-query-runner-read`, `/admin/postgres-query-runner-read-export`, `/admin/postgres-query-ai`, `/admin/postgres-import`, and `/admin/monitor` (its Database tab); the writes `/admin/object-create`, `/admin/object-update` and `/admin/object-delete` (for users granted the route's id). The list in `config_api` is the source of truth; a project flags its own routes the same way.
 
-**Writes on another database.** Every generic write route (`object-create`, `object-update`, `object-delete` and `object-delete-all` under `/my`, `/permission` and `/admin`, and `/public/object-create`) checks its columns (`created_by_id`, `updated_by_id`, the ownership column) against the chosen database's schema and writes there; buffered rows (`mode=buffer`) are flushed to that database and queued jobs (`queue=`) carry its name to the consumer. Atom flags only the `/admin` writes; a project turns the others on by adding `"is_connection_param": True` to their entry in `config_extend.py`.
+**Writes on another database.** Every generic write route (`object-create`, `object-update`, `object-delete` and `object-delete-all` under `/my` and `/admin`, and `/public/object-create`) checks access in the chosen database's `control` and its columns (`created_by_id`, `updated_by_id`, the ownership column) against that database's schema, and writes there; buffered rows (`mode=buffer`) are flushed to that database and queued jobs (`queue=`) carry its name to the consumer. Atom flags only the `/admin` writes; a project turns the others on by giving their entry `"is_connection_param": True` in `config_extend.py` (the route's whole entry, e.g. `"/my/object-create": {"id": 25, "auth": ["jwt"], "is_connection_param": True}`).
 
-Two controls decide where a write can go, and no extra setting: the route's flag, and what the database user in `config_postgres_url_<name>` may do. Once a write route is flagged, its callers can write to every database whose user has write rights, so give each URL only the rights it needs: a read-only user for replicas and reporting databases, and leave `/public/object-create` unflagged. A write the database refuses (a read-only replica) is an error, never redirected to master. `/my/object-read` marks messages read on the database it read them from: read messages on master, not on a read-only replica.
+Two controls decide where a write can go, and no extra setting: the route's flag, and what the database user in `config_postgres_url_<name>` may do. Once a write route is flagged, its callers can write to every database whose user has write rights, so give each URL only the rights it needs: a read-only user for replicas and reporting databases, and leave `/public/object-create` unflagged. A write the database refuses (a read-only replica) is an error, never redirected to master. The writes a read makes (mark-as-read, `last_active_at`) go to the database whose rules apply: master for a replica ([read replicas](#read-replicas-a-database-without-its-own-schema)).
 
-The user routes (`user-*`), `/my/object-create-mongodb` and `/admin/postgres-query-runner-write` (which takes a `connection` body field) stay as they are. SQL Server and ClickHouse routes pick their server with a body field also named `connection` (see section 3).
+The user routes (`user-*`, always master; `/my/profile` and `/private/user-read` also take a read replica of master), `/my/object-create-mongodb` and `/admin/postgres-query-runner-write` (always master) take no `connection`. SQL Server and ClickHouse routes pick their server with a body field also named `connection` (see section 3).
 ```bash
 curl "http://localhost:8000/public/object-read?table=products&connection=replica1"    # replica1
 curl "http://localhost:8000/public/object-read?table=products"                        # master
@@ -53,29 +73,29 @@ curl -H "Authorization: Bearer $TOKEN" "http://localhost:8000/admin/postgres-sch
 
 Each database has its own schema: `config_postgres_schema_<name>` is applied at startup to the database of `config_postgres_url_<name>`, master first. `config_postgres_schema_master` holds Atom's tables; a project adds one for another database in `config_extend.py`, and that database gets exactly what its schema lists (nothing of Atom's, no `users`). A schema naming a database without a URL stops startup.
 
-Each table is an object: `column` (required) and who may use it through Atom's object routes (`public`, `private`, `my`, `admin`; closed unless listed), plus `row_lock`, `row_delete_max`, `users_delete_skip`, `buffer_limit` and `retention_day`. The schema is the one place a table's structure, access and labels are set; the keys are in [config.md](config.md#table-keys).
+A schema is `{"table", "control", "sql"}`. Each table is `{"column": [...]}`; its column keys hold the column's rules (`read_blocked`, `write_blocked`, `ownership`, `regex`, `int_mapping`). `control` holds the database's rules: extensions, switches, which tables each route group may use (`public_read`, `private_read`, `my_create`, ...; closed unless listed; the admin routes reach every table in it), `row_update_disabled`, `row_delete_disabled`, `row_delete_max`, `buffer_limit` and `retention_day`. The schema is the one place a table's structure, access and labels are set; the keys and who enforces each are in [config.md](config.md#parts).
 
 When `config_is_postgres_schema_init = True`, Atom inspects and automatically migrates each database on startup:
-- Creates the PostgreSQL extensions of its `extension` part.
+- Creates the PostgreSQL extensions of its `control.extension`.
 - Creates missing tables declared in its `table` part, with their primary key: `id`, several columns (`device`, `time`), or none.
 - Adds missing columns and alters types if necessary.
 - Installs unique constraints, checks and indexes from the column specs.
-- Attaches Atom's triggers (truncate, `updated_at`, `is_protected`, `row_lock`, `row_delete_max`) only to the tables that database's schema lists.
-- Only in the database whose schema has `users` (master): seeds the root admin user (`admin` / `role: 1`) and attaches the root protection and `users` triggers.
+- Attaches Atom's triggers (`is_truncate_disabled`, `is_updated_at_set`, `is_protected_delete_disabled`, `row_update_disabled`, `row_delete_disabled`, `row_delete_max`) only to the tables that database's schema lists.
+- Only in `master`: the users setup, by the flat settings `config_is_root_user` (seeds and guards `admin`, id 1, role 1), `config_is_users_password_log`, `config_is_users_delete_log` and `config_is_totp_clear` (the `users` triggers).
 - Runs its `sql` part last (for example `create_hypertable`, [timescaledb.md](timescaledb.md)).
 
 ```python
 # config_extend.py: a second database, telematics (config_postgres_url_telematics in .env)
 config_postgres_schema_telematics = {
-"extension": ["timescaledb"],
-"table": {"reading": {"admin": ["read"], "column": [{"name": "device", "datatype": "text", "is_primary": True}, {"name": "time", "datatype": "timestamptz", "is_primary": True}, {"name": "speed", "datatype": "real"}]}},
+"table": {"reading": {"column": [{"name": "device", "datatype": "text", "is_primary_key": True}, {"name": "time", "datatype": "timestamptz", "is_primary_key": True}, {"name": "speed", "datatype": "real"}]}},
+"control": {"extension": ["timescaledb"]},
 "sql": {"reading_hypertable": "SELECT create_hypertable('reading', 'time', if_not_exists => TRUE)"},
 }
 ```
 
-**`id` is optional.** A table with `id` (an integer) gets every generic route; on a table without it, create and read work (read with an `order`, e.g. `order=time desc`), while update, delete and relation fetch answer 400 `table '<name>' has no id: ... needs one`, before any SQL.
+**`id` is optional.** A table with `id` (an integer) gets every generic route; on a table without it, create (when it has `created_by_id`) and read work (read with an `order`, e.g. `order=time desc`; without one, 400 `table has no id: pass order (e.g. order=time desc)`), while update, delete and relation fetch answer 400 `table '<name>' has no id: ... needs one`, before any SQL.
 
-It reads the current tables, columns, indexes, constraints and triggers once (a few catalog queries for all tables), then changes only what differs from `config_postgres_schema_master`; an unchanged database takes about 14 queries, so a start against a remote database stays near one second. Tables, the root user and triggers change in one transaction: other sessions see the old schema or the new one, and a delete guard is never missing while an instance starts. A trigger is recreated only when its definition differs, so a guard removed or edited by hand is put back on the next start. Extensions run before that transaction (a missing privilege is skipped) and custom `sql` after it.
+It reads the current tables, columns, indexes, constraints and triggers once (a few catalog queries for all tables), then changes only what differs from that database's `config_postgres_schema_<name>`; an unchanged database takes about 14 queries, so a start against a remote database stays near one second. Tables, the root user and triggers change in one transaction: other sessions see the old schema or the new one, and a delete guard is never missing while an instance starts. A trigger is recreated only when its definition differs, so a guard removed or edited by hand is put back on the next start. Extensions run before that transaction (a missing privilege is skipped) and custom `sql` after it.
 
 **Busy tables and big changes.** In that transaction each table lock is waited for at most `config_postgres_lock_timeout_sec` (10 s): when another session holds a table that long, startup stops with `schema init: a table stayed locked ... nothing was changed` instead of hanging the deploy, and the whole change rolls back. To see what the next start would change before deploying, run the plan with the new code against the target database:
 
@@ -87,6 +107,29 @@ venv/bin/python -m script.postgres_schema_plan --db telematics    # one database
 It plans every database that has a schema and a URL. It reads the catalog on a read-only connection, changes nothing, and prints each change, flagging the ones that lock or rewrite a table (`ALTER COLUMN ... TYPE`, `SET NOT NULL`, `CREATE INDEX` without `CONCURRENTLY`, `DROP`) with the table's estimated rows. A flagged change on a big table is better run by hand when it is quiet; the next start then finds nothing to change. Statements that run on every start (trigger functions, the root user) are only counted.
 
 `venv/bin/python -m script.postgres_schema_plan --apply` prints the same plan, then runs it exactly as startup does (one transaction, the same advisory lock and lock timeout). With `config_is_postgres_schema_init = False`, startup changes nothing and only compares: if a database differs from its `config_postgres_schema_<name>` it stops, listing the changes, so the app never runs against a schema its code does not expect. A production deploy then is: `postgres_schema_plan`, read it, `postgres_schema_plan --apply`, start the app.
+
+### Adding a database, end to end
+
+| Step | What to set |
+|---|---|
+| Connect | `.env`: `config_postgres_url_<name>=postgresql://...`; the user owns the database's `public` schema (Atom creates the tables). Optional: `config_postgres_pool_max_size_<name>` |
+| Schema | `config_extend.py`: `config_postgres_schema_<name> = {"table": {...}, "control": {...}, "sql": {...}}`, the same `<name>`, written whole (no Atom base). Column keys as in master ([config.md](config.md#column-keys)) |
+| Extensions | `control.extension` of that schema (`["timescaledb", "postgis"]`). One the user may not create: an admin runs `CREATE EXTENSION` once; startup skips it with a warning |
+| Login | Nothing: users, tokens and permissions stay on master; the same token works on every database |
+| Admin routes | `/admin/object-*`, `/admin/table-column-*`, `/admin/postgres-import` with `?connection=<name>` reach every table of that schema, for users whose `master.users.permissions` hold the route's id (root has all of them) |
+| Other routes | List the tables in that schema's `control`: `public_read`, `private_read`, `my_read`, ... (closed unless listed). Reads take `?connection=` already; `/my` and `/public` writes need `"is_connection_param": True` on their `config_api` entry. `/my` needs `created_by_id` (and `updated_by_id` for update); `/public/object-create` needs `created_by_id` |
+| Columns the routes need | Every generic create (`/my`, `/public`, `/admin`) needs a `created_by_id` column, every update an `updated_by_id`; soft delete a `deleted_at`. A table without `id` is read with `order=`; its update, delete and relation fetch, and the create of a table without `created_by_id` (device points), are the feature's own routes or `func_postgres_create` |
+| Buffered writes | `mode=buffer` on a create, or `func_postgres_create(mode="buffer", connection="<name>")` from code; `control.buffer_limit` per table; `config_postgres_buffer_flush_auto_sec_<name>` for its own interval ([buffering](#4-in-memory-write-buffering)) |
+| Retention | `control.retention_day` (needs a `created_at` column; deleted hourly by `script/postgres_cleanup.py`), or for a hypertable a TimescaleDB policy in `sql` ([timescaledb.md](timescaledb.md)) |
+| Guards | `control.is_truncate_disabled` is on by default; `row_update_disabled`, `row_delete_disabled`, `row_delete_max` as needed (`row_delete_max` never on a hypertable) |
+| Check | `venv/bin/python -m script.postgres_schema_plan --db <name>` shows what the next start changes; `GET /admin/postgres-schema?connection=<name>` what Atom sees |
+
+Master only, whatever the database: the users-delete worker, `script.postgres_backup` and `/admin/postgres-query-runner-write` (SQL that changes another database goes through a project script or a database tool). Example calls on `telematics`:
+
+```bash
+curl -H "Authorization: Bearer $ADMIN_TOKEN" "http://localhost:8000/admin/object-read?connection=telematics&table=gps_point&order=time%20desc&limit=50"
+curl -G -H "Authorization: Bearer $ADMIN_TOKEN" "http://localhost:8000/admin/table-column-groupby" --data-urlencode "connection=telematics" --data-urlencode "table=gps_point" --data-urlencode 'col=["device_id"]'
+```
 
 ---
 
@@ -121,8 +164,8 @@ A route that takes rows from another system (a device webhook, a feed) calls `fu
 ```python
 await app_state.func_postgres_create(client_postgres=app_state.client_postgres_dict["telemetry"], client_postgres_conn=None, client_password_hasher=None,
     cache_postgres_schema=app_state.cache_postgres_schema_dict["telemetry"], buffer_postgres=app_state.buffer_postgres_create,
-    buffer_rows_max=app_state.config_buffer_rows_max, buffer_full_mode="reject", config_column_regex=app_state.config_column_regex,
-    buffer_limit=app_state.func_buffer_limit(app_state=app_state, table="gps_point"), mode="buffer", table="gps_point", obj_list=points,
+    buffer_rows_max=app_state.config_buffer_rows_max, buffer_full_mode="reject", column_regex=app_state.func_column_regex(app_state=app_state, table="gps_point", connection="telemetry"),
+    buffer_limit=app_state.func_buffer_limit(app_state=app_state, table="gps_point", connection="telemetry"), mode="buffer", table="gps_point", obj_list=points,
     connection="telemetry", on_conflict="nothing")
 ```
 | Argument | Effect |
@@ -164,9 +207,16 @@ To keep high-volume log writes from contending with business transactions, route
 config_postgres_url_master=postgresql://atom:pass@primary-db:5432/atom
 config_postgres_url_logs=postgresql://logger:pass@logs-db:5432/atom_logs
 ```
-Then move the `log_api` table into that database's schema in `config_extend.py`: out of master's schema, into the logs one (the same definition, not a copy). The database whose schema has `log_api` gets the logs:
+Then move the `log_api` table into that database's schema in `config_extend.py`: out of master's schema and every list of master's `control` (a list naming a table not in the schema stops startup), into the logs one with its control entries (the same definition, not a copy). The database whose schema has `log_api` gets the logs:
 ```python
-config_postgres_schema_master = {**base_config_postgres_schema_master, "table": {k: v for k, v in base_config_postgres_schema_master["table"].items() if k != "log_api"}}
-config_postgres_schema_logs = {"table": {"log_api": base_config_postgres_schema_master["table"]["log_api"]}}
+config_postgres_schema_master = {
+**base_config_postgres_schema_master,
+"table": {k: v for k, v in base_config_postgres_schema_master["table"].items() if k != "log_api"},
+"control": {k: [t for t in v if t != "log_api"] if k != "extension" and isinstance(v, list) else {t: n for t, n in v.items() if t != "log_api"} if isinstance(v, dict) else v for k, v in base_config_postgres_schema_master["control"].items()},
+}
+config_postgres_schema_logs = {
+"table": {"log_api": base_config_postgres_schema_master["table"]["log_api"]},
+"control": {"my_read": ["log_api"], "row_update_disabled": ["log_api"], "buffer_limit": {"log_api": 1000}, "retention_day": {"log_api": 7}},
+}
 ```
 Startup stops while API logging is on and `log_api` is in no schema, or in two. `/admin/monitor?view=app` shows it as `log_database`. Atom resolves `app.state.client_postgres_log_api = app.state.client_postgres_dict["logs"]` and routes log writes, cleanup and `/my/api-usage` to it.

@@ -6,13 +6,13 @@ Atom stores and searches vectors. Your code or worker makes them, with an AI mod
 
 ## 1. The extension
 
-`vector` is in Atom's `config_postgres_schema_master` `extension` list, so startup installs it where it can. Every extension is optional: one this server lacks, or this user may not install (Azure: allow it in the server's `azure.extensions` first), prints a warning and startup goes on. Nothing uses it until a table has a vector column.
+`vector` is in Atom's `config_postgres_schema_master` `control.extension` list (another database lists it in its own `control.extension`), so startup installs it where it can. Every extension is optional: one this server lacks, or this user may not install (Azure: allow it in the server's `azure.extensions` first), prints a warning and startup goes on. Nothing uses it until a table has a vector column.
 
 ## 2. Add a vector column
 
 ```python
 # config_extend.py, in the table's columns
-{"name": "embedding", "datatype": "vector(768)", "index": "hnsw(embedding)"},
+{"name": "embedding", "datatype": "vector(768)", "index": ["hnsw(embedding)"]},
 ```
 
 - The size is the model's output (Gemini `gemini-embedding-001` with `output_dimensionality=768`, OpenAI `text-embedding-3-small`: 1536).
